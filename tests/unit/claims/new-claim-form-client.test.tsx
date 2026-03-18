@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { NewClaimFormClient } from "@/modules/claims/ui/new-claim-form-client";
 
 const mockSubmitClaimAction = jest.fn();
+const mockParseReceiptAction = jest.fn();
 const mockPush = jest.fn();
 const mockToastError = jest.fn();
 const mockToastPromise = jest.fn();
@@ -22,6 +23,10 @@ jest.mock("sonner", () => ({
 
 jest.mock("@/modules/claims/actions", () => ({
   submitClaimAction: (...args: unknown[]) => mockSubmitClaimAction(...args),
+}));
+
+jest.mock("@/modules/claims/actions/parse-receipt", () => ({
+  parseReceiptAction: (...args: unknown[]) => mockParseReceiptAction(...args),
 }));
 
 const mockUpload = jest.fn();
@@ -92,6 +97,12 @@ describe("NewClaimFormClient", () => {
     jest.clearAllMocks();
     mockToastPromise.mockImplementation(async (promise: Promise<unknown>) => promise);
     mockSubmitClaimAction.mockResolvedValue({ ok: true, claimId: "claim-1" });
+    mockParseReceiptAction.mockResolvedValue({
+      ok: false,
+      data: null,
+      autoFillAllowed: false,
+      message: "Could not auto-read receipt. Please fill manually.",
+    });
     mockUpload.mockResolvedValue({ data: { path: "expenses/u/receipt.pdf" }, error: null });
   });
 

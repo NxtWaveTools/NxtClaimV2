@@ -10,6 +10,7 @@ import {
   type ClaimFormOptions,
   type CurrentUserHydration,
 } from "@/modules/claims/actions";
+import { parseReceiptAction } from "@/modules/claims/actions/parse-receipt";
 import { newClaimSubmitSchema } from "@/modules/claims/validators/new-claim-schema";
 
 type NewClaimFormClientProps = {
@@ -154,6 +155,7 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
   const [bankStatementFile, setBankStatementFile] = useState<File | null>(null);
   const [advanceSupportingFile, setAdvanceSupportingFile] = useState<File | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isAiParsing, setIsAiParsing] = useState(false);
 
   const defaultPaymentMode = options.paymentModes[0];
 
@@ -506,6 +508,94 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
     );
 
     void onSubmit(event);
+  };
+
+  const handleAutoFillWithAI = async () => {
+    if (!invoiceFile) {
+      toast.error("Invoice/Bill upload is required.");
+      return;
+    }
+
+    const invoiceValidationError = validateUploadFile(invoiceFile, "Invoice/Bill file");
+    if (invoiceValidationError) {
+      setFileError(invoiceValidationError);
+      toast.error(invoiceValidationError);
+      return;
+    }
+
+    setFileError(null);
+    setIsAiParsing(true);
+
+    try {
+      const formData = new FormData();
+      formData.append("receiptFile", invoiceFile);
+
+      const result = await parseReceiptAction(formData);
+      if (!result.ok || !result.data) {
+        toast.error(result.message ?? "Could not auto-read receipt. Please fill manually.");
+        return;
+      }
+
+      const parsed = result.data;
+
+      if (parsed.fraudFlags.length > 0) {
+        toast.warning(`Receipt anomalies detected: ${parsed.fraudFlags.join(", ")}`);
+      }
+
+      if (parsed.confidenceScore < 90 || !result.autoFillAllowed) {
+        toast.warning("Low confidence parse. Please fill manually.");
+        return;
+      }
+
+      const hasGstAmounts = parsed.cgstAmount > 0 || parsed.sgstAmount > 0 || parsed.igstAmount > 0;
+
+      setValue("expense.billNo", parsed.billNo ?? "", {
+        shouldDirty: true,
+        shouldTouch: true,
+        shouldValidate: true,
+      });
+      setValue("expense.transactionDate", parsed.transactionDate ?? "", {
+        shouldDirty: true,
+        shouldTouch: true,
+        shouldValidate: true,
+      });
+      setValue("expense.basicAmount", parsed.basicAmount, {
+        shouldDirty: true,
+        shouldTouch: true,
+        shouldValidate: true,
+      });
+      setValue("expense.isGstApplicable", hasGstAmounts, {
+        shouldDirty: true,
+        shouldTouch: true,
+        shouldValidate: true,
+      });
+      setValue("expense.cgstAmount", parsed.cgstAmount, {
+        shouldDirty: true,
+        shouldTouch: true,
+        shouldValidate: true,
+      });
+      setValue("expense.sgstAmount", parsed.sgstAmount, {
+        shouldDirty: true,
+        shouldTouch: true,
+        shouldValidate: true,
+      });
+      setValue("expense.igstAmount", parsed.igstAmount, {
+        shouldDirty: true,
+        shouldTouch: true,
+        shouldValidate: true,
+      });
+      setValue("expense.vendorName", parsed.vendorName, {
+        shouldDirty: true,
+        shouldTouch: true,
+        shouldValidate: true,
+      });
+
+      toast.success("Receipt parsed and form fields auto-filled.");
+    } catch {
+      toast.error("Could not auto-read receipt. Please fill manually.");
+    } finally {
+      setIsAiParsing(false);
+    }
   };
 
   return (
@@ -980,6 +1070,41 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
               <p className="text-xs text-slate-500">
                 Allowed: PDF, JPG, PNG, WEBP. Max size: 25MB.
               </p>
+              <button
+                type="button"
+                onClick={handleAutoFillWithAI}
+                disabled={isSubmitting || isAiParsing || !invoiceFile}
+                className="mt-2 inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 transition-all duration-200 hover:bg-slate-50 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-900"
+              >
+                {isAiParsing ? (
+                  <>
+                    <svg
+                      className="h-4 w-4 animate-spin"
+                      viewBox="0 0 20 20"
+                      aria-hidden="true"
+                      fill="none"
+                    >
+                      <circle
+                        cx="10"
+                        cy="10"
+                        r="7"
+                        stroke="currentColor"
+                        strokeOpacity="0.3"
+                        strokeWidth="2"
+                      />
+                      <path
+                        d="M10 3a7 7 0 0 1 7 7"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                      />
+                    </svg>
+                    Auto-filling...
+                  </>
+                ) : (
+                  "✨ Auto-fill with AI"
+                )}
+              </button>
             </div>
 
             <div className="grid gap-1">
