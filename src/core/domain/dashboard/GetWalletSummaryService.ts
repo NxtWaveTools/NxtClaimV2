@@ -18,8 +18,21 @@ const EMPTY_WALLET_TOTALS: WalletSummaryTotals = {
   pettyCashBalance: 0,
 };
 
+class LedgerIntegrityError extends Error {
+  constructor(metric: string, value: number) {
+    super(`Ledger integrity failure: ${metric} cannot be negative (received ${value}).`);
+    this.name = "LedgerIntegrityError";
+  }
+}
+
 function roundCurrency(value: number): number {
   return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
+function assertNonNegativeLedger(metric: string, value: number): void {
+  if (value < 0) {
+    throw new LedgerIntegrityError(metric, value);
+  }
 }
 
 export class GetWalletSummaryService {
@@ -48,13 +61,31 @@ export class GetWalletSummaryService {
       };
     }
 
+    try {
+      assertNonNegativeLedger("totalPettyCashReceived", result.data.totalPettyCashReceived);
+      assertNonNegativeLedger("totalPettyCashSpent", result.data.totalPettyCashSpent);
+      assertNonNegativeLedger("totalReimbursements", result.data.totalReimbursements);
+      assertNonNegativeLedger("totalExpenseSubmitted", result.data.totalExpenseSubmitted);
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : "Ledger integrity validation failed.";
+
+      this.logger.error("dashboard.wallet_summary.integrity_failed", {
+        userId,
+        errorMessage,
+      });
+
+      return {
+        data: null,
+        errorMessage,
+      };
+    }
+
     const totalPettyCashReceived = roundCurrency(result.data.totalPettyCashReceived);
     const totalPettyCashSpent = roundCurrency(result.data.totalPettyCashSpent);
     const totalReimbursements = roundCurrency(result.data.totalReimbursements);
-    const totalExpenseSubmitted = roundCurrency(result.data.totalExpenseSubmitted);
-
     const amountReceived = roundCurrency(totalPettyCashReceived + totalReimbursements);
-    const amountSpent = totalExpenseSubmitted;
+    const amountSpent = totalPettyCashSpent;
     const pettyCashBalance = roundCurrency(totalPettyCashReceived - totalPettyCashSpent);
 
     const summary: WalletSummaryTotals = {

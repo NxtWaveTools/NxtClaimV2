@@ -28,7 +28,12 @@ const expenseDetailSchema = z.object({
   detailType: z.literal("expense"),
   expense: z.object({
     billNo: z.string().trim().min(1, "Bill number is required"),
-    transactionId: optionalTextToNA,
+    transactionId: z
+      .string()
+      .trim()
+      .optional()
+      .or(z.literal(""))
+      .transform((val) => (!val || val.trim() === "" ? "N/A" : val.trim())),
     purpose: optionalTextToNA,
     expenseCategoryId: uuidSchema,
     productId: uuidSchema,
@@ -39,7 +44,7 @@ const expenseDetailSchema = z.object({
     sgstAmount: z.number().min(0, "SGST amount cannot be negative"),
     igstAmount: z.number().min(0, "IGST amount cannot be negative"),
     transactionDate: z.iso.date("Transaction date is required"),
-    basicAmount: z.number().min(1, "Basic amount must be greater than zero"),
+    basicAmount: z.number().min(0, "Basic amount cannot be negative"),
     totalAmount: z.number().min(0, "Total amount cannot be negative"),
     currencyCode: z.string().trim().min(1).default("INR"),
     vendorName: optionalTextToNA,
@@ -58,7 +63,7 @@ const expenseDetailSchema = z.object({
 const advanceDetailSchema = z.object({
   detailType: z.literal("advance"),
   advance: z.object({
-    requestedAmount: z.coerce.number().positive("Requested amount must be greater than zero"),
+    requestedAmount: z.coerce.number().min(0, "Requested amount cannot be negative"),
     budgetMonth: z.coerce
       .number()
       .int("Budget month is required")
@@ -80,7 +85,6 @@ const advanceDetailSchema = z.object({
     purpose: optionalTextToNA,
     receiptFileBase64: optionalTextToNA,
     receiptFileName: optionalTextToNA,
-    receiptFileHash: optionalTextToNA,
     productId: uuidSchema.nullable(),
     locationId: uuidSchema.nullable(),
     remarks: optionalTextToNA,

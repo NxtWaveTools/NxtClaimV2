@@ -18,17 +18,34 @@ export function BackButton({
   const router = useRouter();
   const variant = "ghost";
 
-  const handleGoBack = () => {
-    const hasHistory = window.history.length > 1;
+  const resolveTargetHref = (): string => {
     const referrer = document.referrer;
     const sameOriginReferrer = referrer.startsWith(window.location.origin);
 
-    if (hasHistory && sameOriginReferrer) {
-      router.back();
-      return;
+    if (!sameOriginReferrer) {
+      return fallbackHref;
     }
 
-    router.push(fallbackHref);
+    try {
+      const referrerUrl = new URL(referrer);
+      const referrerView = referrerUrl.searchParams.get("view");
+
+      if (
+        fallbackHref.startsWith(ROUTES.claims.myClaims) &&
+        referrerUrl.pathname === ROUTES.claims.myClaims &&
+        referrerView === "approvals"
+      ) {
+        return `${ROUTES.claims.myClaims}?view=approvals`;
+      }
+    } catch {
+      return fallbackHref;
+    }
+
+    return fallbackHref;
+  };
+
+  const handleGoBack = () => {
+    router.push(resolveTargetHref());
   };
 
   return (

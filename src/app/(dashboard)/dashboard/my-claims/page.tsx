@@ -14,7 +14,6 @@ import type {
 import { GetMyClaimsPaginatedService } from "@/core/domain/claims/GetMyClaimsPaginatedService";
 import { GetPendingApprovalsService } from "@/core/domain/claims/GetPendingApprovalsService";
 import { logger } from "@/core/infra/logging/logger";
-import { getServiceRoleSupabaseClient } from "@/core/infra/supabase/server-client";
 import { SupabaseServerAuthRepository } from "@/modules/auth/repositories/supabase-server-auth.repository";
 import {
   approveClaimAction,
@@ -217,6 +216,7 @@ type ApprovalEvidenceSignedUrls = {
 };
 
 async function resolveApprovalEvidenceUrls(
+  claimRepository: SupabaseClaimRepository,
   rows: Array<{
     id: string;
     expenseReceiptFilePath: string | null;
@@ -224,7 +224,6 @@ async function resolveApprovalEvidenceUrls(
     advanceSupportingDocumentPath: string | null;
   }>,
 ): Promise<Record<string, ApprovalEvidenceSignedUrls>> {
-  const client = getServiceRoleSupabaseClient();
   const signedEntries = await Promise.all(
     rows.map(async (row) => {
       const [
@@ -233,22 +232,46 @@ async function resolveApprovalEvidenceUrls(
         advanceSupportingDocumentSignedUrl,
       ] = await Promise.all([
         isRenderableEvidencePath(row.expenseReceiptFilePath)
-          ? client.storage
-              .from("claims")
-              .createSignedUrl(row.expenseReceiptFilePath, 60 * 10)
-              .then((result) => result.data?.signedUrl ?? null)
+          ? claimRepository
+              .getClaimEvidenceSignedUrl({
+                filePath: row.expenseReceiptFilePath,
+                expiresInSeconds: 60 * 10,
+              })
+              .then((result) => {
+                if (result.errorMessage) {
+                  throw new Error(result.errorMessage);
+                }
+
+                return result.data;
+              })
           : Promise.resolve(null),
         isRenderableEvidencePath(row.expenseBankStatementFilePath)
-          ? client.storage
-              .from("claims")
-              .createSignedUrl(row.expenseBankStatementFilePath, 60 * 10)
-              .then((result) => result.data?.signedUrl ?? null)
+          ? claimRepository
+              .getClaimEvidenceSignedUrl({
+                filePath: row.expenseBankStatementFilePath,
+                expiresInSeconds: 60 * 10,
+              })
+              .then((result) => {
+                if (result.errorMessage) {
+                  throw new Error(result.errorMessage);
+                }
+
+                return result.data;
+              })
           : Promise.resolve(null),
         isRenderableEvidencePath(row.advanceSupportingDocumentPath)
-          ? client.storage
-              .from("claims")
-              .createSignedUrl(row.advanceSupportingDocumentPath, 60 * 10)
-              .then((result) => result.data?.signedUrl ?? null)
+          ? claimRepository
+              .getClaimEvidenceSignedUrl({
+                filePath: row.advanceSupportingDocumentPath,
+                expiresInSeconds: 60 * 10,
+              })
+              .then((result) => {
+                if (result.errorMessage) {
+                  throw new Error(result.errorMessage);
+                }
+
+                return result.data;
+              })
           : Promise.resolve(null),
       ]);
 
@@ -340,7 +363,7 @@ async function ClaimsCommandCenterTable({
     });
 
     const rows = approvalsResult.data;
-    const evidenceSignedUrlByClaimId = await resolveApprovalEvidenceUrls(rows);
+    const evidenceSignedUrlByClaimId = await resolveApprovalEvidenceUrls(claimRepository, rows);
     const gatedStatuses = {
       l1: DB_CLAIM_STATUSES[0],
       finance: DB_CLAIM_STATUSES[1],

@@ -55,7 +55,6 @@ export type ClaimSubmissionInput = {
     totalAmount: number;
     currencyCode: string;
     vendorName: string | null;
-    receiptFileHash: string;
     receiptFilePath: string | null;
     bankStatementFilePath: string | null;
     peopleInvolved: string | null;
@@ -68,7 +67,6 @@ export type ClaimSubmissionInput = {
     expectedUsageDate: string | null;
     purpose: string;
     supportingDocumentPath: string | null;
-    supportingDocumentHash: string | null;
     productId: string | null;
     locationId: string | null;
     remarks: string | null;
@@ -85,7 +83,6 @@ export type FinanceExpenseEditPayload = {
   productId: string | null;
   remarks: string | null;
   receiptFilePath: string | null;
-  receiptFileHash: string | null;
 };
 
 export type FinanceAdvanceEditPayload = {
@@ -94,7 +91,6 @@ export type FinanceAdvanceEditPayload = {
   productId: string | null;
   remarks: string | null;
   supportingDocumentPath: string | null;
-  supportingDocumentHash: string | null;
 };
 
 export type FinanceClaimEditPayload = FinanceExpenseEditPayload | FinanceAdvanceEditPayload;
@@ -104,9 +100,7 @@ export type ClaimFinanceEditSnapshot = {
   detailType: ClaimDetailType;
   submittedBy: string;
   expenseReceiptFilePath: string | null;
-  expenseReceiptFileHash: string | null;
   advanceSupportingDocumentPath: string | null;
-  advanceSupportingDocumentHash: string | null;
 };
 
 export type GetMyClaimsFilters = {
@@ -226,10 +220,6 @@ export type ClaimRepository = {
     data: { id: string; email: string; fullName: string | null } | null;
     errorMessage: string | null;
   }>;
-  existsExpenseByReceiptFileHash(receiptFileHash: string): Promise<{
-    exists: boolean;
-    errorMessage: string | null;
-  }>;
   existsExpenseByCompositeKey(input: {
     billNo: string;
     transactionDate: string;
@@ -296,6 +286,10 @@ export type ClaimRepository = {
     limit: number;
     offset: number;
   }): Promise<{ data: ClaimExportRecord[]; errorMessage: string | null }>;
+  getClaimEvidenceSignedUrl(input: {
+    filePath: string;
+    expiresInSeconds: number;
+  }): Promise<{ data: string | null; errorMessage: string | null }>;
 };
 
 export type ClaimDomainLogger = {

@@ -6,7 +6,6 @@ const mockGetActivePaymentModes = jest.fn();
 const mockGetActiveExpenseCategories = jest.fn();
 const mockGetActiveProducts = jest.fn();
 const mockGetActiveLocations = jest.fn();
-const mockExistsExpenseByReceiptHash = jest.fn();
 const mockExistsExpenseByCompositeKey = jest.fn();
 const mockGetActiveUserIdByEmail = jest.fn();
 const mockIsUserApprover1InAnyDepartment = jest.fn();
@@ -49,7 +48,6 @@ jest.mock("@/modules/claims/repositories/SupabaseClaimRepository", () => ({
     getActiveExpenseCategories: mockGetActiveExpenseCategories,
     getActiveProducts: mockGetActiveProducts,
     getActiveLocations: mockGetActiveLocations,
-    existsExpenseByReceiptFileHash: mockExistsExpenseByReceiptHash,
     existsExpenseByCompositeKey: mockExistsExpenseByCompositeKey,
     getActiveUserIdByEmail: mockGetActiveUserIdByEmail,
     isUserApprover1InAnyDepartment: mockIsUserApprover1InAnyDepartment,
@@ -220,11 +218,6 @@ describe("claims actions", () => {
       claimId: "claim-1",
     });
 
-    mockExistsExpenseByReceiptHash.mockResolvedValue({
-      exists: false,
-      errorMessage: null,
-    });
-
     mockExistsExpenseByCompositeKey.mockResolvedValue({
       exists: false,
       errorMessage: null,
@@ -345,22 +338,6 @@ describe("claims actions", () => {
     expect(result).toEqual({ ok: false, message: "Database error" });
   });
 
-  test("submitClaimAction returns duplicate file error", async () => {
-    mockExistsExpenseByReceiptHash.mockResolvedValueOnce({
-      exists: true,
-      errorMessage: null,
-    });
-
-    const { submitClaimAction } = await import("@/modules/claims/actions");
-    const result = await submitClaimAction(validExpensePayload);
-
-    expect(result).toEqual({
-      ok: false,
-      errorCode: "DUPLICATE_FILE",
-      message: "This exact receipt file has already been submitted.",
-    });
-  });
-
   test("submitClaimAction returns duplicate transaction error", async () => {
     mockExistsExpenseByCompositeKey.mockResolvedValueOnce({
       exists: true,
@@ -396,7 +373,6 @@ describe("claims actions", () => {
     formData.append("advance.purpose", "Team snacks and local expenses");
     formData.append("advance.receiptFileName", "supporting.pdf");
     formData.append("advance.receiptFileBase64", "dGVzdA==");
-    formData.append("advance.receiptFileHash", "");
     formData.append("advance.productId", "");
     formData.append("advance.locationId", "");
     formData.append("advance.remarks", "");

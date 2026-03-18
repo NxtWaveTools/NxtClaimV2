@@ -130,8 +130,8 @@ describe("newClaimSubmitSchema", () => {
     if (parsed.success) {
       expect(parsed.data.onBehalfEmail).toBe("N/A");
       expect(parsed.data.onBehalfEmployeeCode).toBe("N/A");
-      expect(parsed.data.advance.purpose).toBe("N/A");
-      expect(parsed.data.advance.remarks).toBe("N/A");
+      expect(parsed.data.advance?.purpose).toBe("N/A");
+      expect(parsed.data.advance?.remarks).toBe("N/A");
     }
   });
 });

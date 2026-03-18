@@ -201,12 +201,10 @@ type FinanceApproverSelectionRow = {
 
 type ClaimFinanceEditExpenseRow = {
   receipt_file_path: string | null;
-  receipt_file_hash: string | null;
 };
 
 type ClaimFinanceEditAdvanceRow = {
   supporting_document_path: string | null;
-  supporting_document_hash: string | null;
 };
 
 type ClaimFinanceEditRow = {
@@ -251,11 +249,15 @@ function toNumber(value: number | string | null | undefined): number | null {
 
 const FINANCE_CLOSED_STATUSES: DbClaimStatus[] = [DB_CLAIM_STATUSES[2], DB_CLAIM_STATUSES[3]];
 
-const FINANCE_HISTORY_STATUSES: DbClaimStatus[] = [
+const FINANCE_NON_REJECTED_VISIBLE_STATUSES: DbClaimStatus[] = [
+  DB_CLAIM_STATUSES[1],
   DB_CLAIM_STATUSES[2],
   DB_CLAIM_STATUSES[3],
-  DB_CLAIM_STATUSES[4],
 ];
+
+function toPostgrestInList(values: string[]): string {
+  return `(${values.map((value) => `"${value.replace(/"/g, '\\"')}"`).join(",")})`;
+}
 
 function normalizeStatusFilter(status: GetMyClaimsFilters["status"]): DbClaimStatus[] {
   if (!status) {
@@ -383,6 +385,22 @@ function buildMyClaimsOwnershipWithCursorOrFilter(userId: string, cursor: Claims
 }
 
 export class SupabaseClaimRepository implements ClaimRepository {
+  async getClaimEvidenceSignedUrl(input: {
+    filePath: string;
+    expiresInSeconds: number;
+  }): Promise<{ data: string | null; errorMessage: string | null }> {
+    const client = getServiceRoleSupabaseClient();
+    const { data, error } = await client.storage
+      .from("claims")
+      .createSignedUrl(input.filePath, input.expiresInSeconds);
+
+    if (error) {
+      return { data: null, errorMessage: error.message };
+    }
+
+    return { data: data?.signedUrl ?? null, errorMessage: null };
+  }
+
   async getFinanceApproverIdsForUser(
     userId: string,
   ): Promise<{ data: string[]; errorMessage: string | null }> {
@@ -672,9 +690,7 @@ export class SupabaseClaimRepository implements ClaimRepository {
       detailType: "expense" | "advance";
       submittedBy: string;
       expenseReceiptFilePath: string | null;
-      expenseReceiptFileHash: string | null;
       advanceSupportingDocumentPath: string | null;
-      advanceSupportingDocumentHash: string | null;
     } | null;
     errorMessage: string | null;
   }> {
@@ -682,7 +698,7 @@ export class SupabaseClaimRepository implements ClaimRepository {
     const { data, error } = await client
       .from("claims")
       .select(
-        "id, detail_type, submitted_by, expense_details(receipt_file_path, receipt_file_hash), advance_details(supporting_document_path, supporting_document_hash)",
+        "id, detail_type, submitted_by, expense_details(receipt_file_path), advance_details(supporting_document_path)",
       )
       .eq("id", claimId)
       .eq("is_active", true)
@@ -706,9 +722,7 @@ export class SupabaseClaimRepository implements ClaimRepository {
         detailType: row.detail_type,
         submittedBy: row.submitted_by,
         expenseReceiptFilePath: expense?.receipt_file_path ?? null,
-        expenseReceiptFileHash: expense?.receipt_file_hash ?? null,
         advanceSupportingDocumentPath: advance?.supporting_document_path ?? null,
-        advanceSupportingDocumentHash: advance?.supporting_document_hash ?? null,
       },
       errorMessage: null,
     };
@@ -732,7 +746,6 @@ export class SupabaseClaimRepository implements ClaimRepository {
           product_id: payload.productId,
           remarks: payload.remarks,
           receipt_file_path: payload.receiptFilePath,
-          receipt_file_hash: payload.receiptFileHash,
         })
         .eq("claim_id", claimId)
         .eq("is_active", true);
@@ -751,7 +764,6 @@ export class SupabaseClaimRepository implements ClaimRepository {
         product_id: payload.productId,
         remarks: payload.remarks,
         supporting_document_path: payload.supportingDocumentPath,
-        supporting_document_hash: payload.supportingDocumentHash,
       })
       .eq("claim_id", claimId)
       .eq("is_active", true);
@@ -957,24 +969,6 @@ export class SupabaseClaimRepository implements ClaimRepository {
       },
       errorMessage: null,
     };
-  }
-
-  async existsExpenseByReceiptFileHash(
-    receiptFileHash: string,
-  ): Promise<{ exists: boolean; errorMessage: string | null }> {
-    const client = getServiceRoleSupabaseClient();
-    const { data, error } = await client
-      .from("expense_details")
-      .select("id")
-      .eq("receipt_file_hash", receiptFileHash)
-      .eq("is_active", true)
-      .limit(1);
-
-    if (error) {
-      return { exists: false, errorMessage: error.message };
-    }
-
-    return { exists: (data ?? []).length > 0, errorMessage: null };
   }
 
   async existsExpenseByCompositeKey(input: {
@@ -1376,7 +1370,6 @@ export class SupabaseClaimRepository implements ClaimRepository {
         "id, employee_id, detail_type, submission_type, on_behalf_email, submitted_by, status, submitted_at, created_at, updated_at, submitter_user:users!claims_submitted_by_fkey!inner(full_name, email), master_departments(name), master_payment_modes(name), expense_details(total_amount, purpose, receipt_file_path, bank_statement_file_path, master_expense_categories(name)), advance_details(requested_amount, purpose, supporting_document_path)",
       )
       .eq("assigned_l1_approver_id", userId)
-      .neq("status", DB_CLAIM_STATUSES[0])
       .eq("is_active", true)
       .order("created_at", { ascending: false })
       .order("id", { ascending: false });
@@ -1529,13 +1522,19 @@ export class SupabaseClaimRepository implements ClaimRepository {
       };
     }
 
+    const financeApproverIdsFilter = toPostgrestInList(financeApproverIds);
+    const financeNonRejectedStatusesFilter = toPostgrestInList(
+      FINANCE_NON_REJECTED_VISIBLE_STATUSES,
+    );
+
     let query = client
       .from("claims")
       .select(
         "id, employee_id, detail_type, submission_type, on_behalf_email, submitted_by, status, submitted_at, created_at, updated_at, submitter_user:users!claims_submitted_by_fkey!inner(full_name, email), master_departments(name), master_payment_modes(name), expense_details(total_amount, purpose, receipt_file_path, bank_statement_file_path, master_expense_categories(name)), advance_details(requested_amount, purpose, supporting_document_path)",
       )
-      .in("assigned_l2_approver_id", financeApproverIds)
-      .in("status", FINANCE_HISTORY_STATUSES)
+      .or(
+        `assigned_l2_approver_id.in.${financeApproverIdsFilter},status.in.${financeNonRejectedStatusesFilter}`,
+      )
       .eq("is_active", true)
       .order("created_at", { ascending: false })
       .order("id", { ascending: false });
@@ -1668,13 +1667,18 @@ export class SupabaseClaimRepository implements ClaimRepository {
     }
 
     if (input.fetchScope === "l1_approvals") {
-      query = query.eq("assigned_l1_approver_id", input.userId).neq("status", DB_CLAIM_STATUSES[0]);
+      query = query.eq("assigned_l1_approver_id", input.userId);
     }
 
     if (input.fetchScope === "finance_approvals") {
-      query = query
-        .in("assigned_l2_approver_id", financeApproverIds)
-        .in("status", FINANCE_HISTORY_STATUSES);
+      const financeApproverIdsFilter = toPostgrestInList(financeApproverIds);
+      const financeNonRejectedStatusesFilter = toPostgrestInList(
+        FINANCE_NON_REJECTED_VISIBLE_STATUSES,
+      );
+
+      query = query.or(
+        `assigned_l2_approver_id.in.${financeApproverIdsFilter},status.in.${financeNonRejectedStatusesFilter}`,
+      );
     }
 
     if (input.filters?.detailType) {

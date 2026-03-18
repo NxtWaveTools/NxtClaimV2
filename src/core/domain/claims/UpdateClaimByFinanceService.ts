@@ -10,9 +10,7 @@ type UpdateClaimByFinanceRepository = {
       detailType: "expense" | "advance";
       submittedBy: string;
       expenseReceiptFilePath: string | null;
-      expenseReceiptFileHash: string | null;
       advanceSupportingDocumentPath: string | null;
-      advanceSupportingDocumentHash: string | null;
     } | null;
     errorMessage: string | null;
   }>;

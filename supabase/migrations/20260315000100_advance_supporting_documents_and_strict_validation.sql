@@ -1,6 +1,5 @@
 alter table if exists public.advance_details
-  add column if not exists supporting_document_path text,
-  add column if not exists supporting_document_hash text;
+  add column if not exists supporting_document_path text;
 
 alter table if exists public.advance_details
   alter column expected_usage_date drop not null;
@@ -119,7 +118,6 @@ begin
       total_amount,
       currency_code,
       vendor_name,
-      receipt_file_hash,
       receipt_file_path,
       bank_statement_file_path,
       people_involved,
@@ -143,7 +141,6 @@ begin
       v_total_amount,
       coalesce(nullif(p_payload->'expense'->>'currency_code', ''), 'INR'),
       nullif(p_payload->'expense'->>'vendor_name', ''),
-      nullif(p_payload->'expense'->>'receipt_file_hash', ''),
       nullif(p_payload->'expense'->>'receipt_file_path', ''),
       nullif(p_payload->'expense'->>'bank_statement_file_path', ''),
       nullif(p_payload->'expense'->>'people_involved', ''),
@@ -187,7 +184,6 @@ begin
       product_id,
       location_id,
       supporting_document_path,
-      supporting_document_hash,
       remarks
     )
     values (
@@ -200,7 +196,6 @@ begin
       nullif(p_payload->'advance'->>'product_id', '')::uuid,
       nullif(p_payload->'advance'->>'location_id', '')::uuid,
       nullif(p_payload->'advance'->>'supporting_document_path', ''),
-      nullif(p_payload->'advance'->>'supporting_document_hash', ''),
       nullif(p_payload->'advance'->>'remarks', '')
     );
   end if;
@@ -212,12 +207,11 @@ $$;
 grant execute on function public.create_claim_with_detail(jsonb) to authenticated;
 
 comment on function public.create_claim_with_detail(jsonb) is
-'Creates claim header and strict detail rows; advance requires amount, budget month/year, and purpose, with optional supporting document path/hash.';
+'Creates claim header and strict detail rows; advance requires amount, budget month/year, and purpose, with optional supporting document path.';
 
 -- Rollback guidance (execute manually when safe):
 -- 0) drop policy if exists "authenticated users can upload own claim files" on storage.objects;
 -- 0.1) create policy "authenticated users can upload own claim files" on storage.objects for insert to authenticated with check (bucket_id = 'claims' and split_part(name, '/', 1) in ('expenses', 'advances') and split_part(name, '/', 2) = auth.uid()::text and split_part(name, '/', 3) <> '');
 -- 1) alter table public.advance_details drop column if exists supporting_document_path;
--- 2) alter table public.advance_details drop column if exists supporting_document_hash;
--- 3) alter table public.advance_details alter column expected_usage_date set not null;
--- 4) restore previous function body for public.create_claim_with_detail(jsonb).
+-- 2) alter table public.advance_details alter column expected_usage_date set not null;
+-- 3) restore previous function body for public.create_claim_with_detail(jsonb).

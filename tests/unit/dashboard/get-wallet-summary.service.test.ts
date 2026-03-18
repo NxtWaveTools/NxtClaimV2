@@ -38,7 +38,7 @@ describe("GetWalletSummaryService", () => {
       totalPettyCashSpent: 1200,
       totalReimbursements: 300,
       amountReceived: 1300,
-      amountSpent: 1500,
+      amountSpent: 1200,
       pettyCashBalance: -200,
     });
   });
@@ -82,7 +82,7 @@ describe("GetWalletSummaryService", () => {
       totalPettyCashSpent: 0,
       totalReimbursements: 0,
       amountReceived: 0.01,
-      amountSpent: 0.01,
+      amountSpent: 0,
       pettyCashBalance: 0.01,
     });
   });
@@ -110,7 +110,7 @@ describe("GetWalletSummaryService", () => {
       totalPettyCashSpent: 10000001,
       totalReimbursements: 0.01,
       amountReceived: 10000000.01,
-      amountSpent: 10000002,
+      amountSpent: 10000001,
       pettyCashBalance: -1,
     });
   });

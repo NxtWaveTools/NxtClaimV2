@@ -1,6 +1,5 @@
 "use server";
 
-import { createHash } from "node:crypto";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { SupabaseServerAuthRepository } from "@/modules/auth/repositories/supabase-server-auth.repository";
@@ -54,13 +53,6 @@ const claimDecisionSchema = z.object({
 const financeEditClaimIdSchema = z.object({
   claimId: claimIdSchema,
 });
-
-class DuplicateFileError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "DuplicateFileError";
-  }
-}
 
 class DuplicateTransactionError extends Error {
   constructor(message: string) {
@@ -265,7 +257,6 @@ function extractSubmissionInput(input: unknown): {
       purpose: getFormDataString(input, "advance.purpose"),
       receiptFileName: getFormDataNullableString(input, "advance.receiptFileName"),
       receiptFileBase64: getFormDataNullableString(input, "advance.receiptFileBase64"),
-      receiptFileHash: getFormDataNullableString(input, "advance.receiptFileHash"),
       productId: getFormDataNullableString(input, "advance.productId"),
       locationId: getFormDataNullableString(input, "advance.locationId"),
       remarks: getFormDataNullableString(input, "advance.remarks"),
@@ -397,7 +388,7 @@ export async function submitClaimAction(input: unknown): Promise<{
   ok: boolean;
   claimId?: string;
   message?: string;
-  errorCode?: "DUPLICATE_FILE" | "DUPLICATE_TRANSACTION";
+  errorCode?: "DUPLICATE_TRANSACTION";
   fieldErrors?: Record<string, string[]>;
 }> {
   const { payload, receiptFile, bankStatementFile, advanceReceiptFile } =
@@ -468,8 +459,6 @@ export async function submitClaimAction(input: unknown): Promise<{
   let uploadedReceiptFilePath: string | null = null;
   let uploadedBankStatementFilePath: string | null = null;
   let uploadedAdvanceSupportingFilePath: string | null = null;
-  let receiptFileHash: string | null = null;
-  let advanceReceiptFileHash: string | null = null;
 
   try {
     if (parseResult.data.detailType === "expense") {
@@ -491,20 +480,6 @@ export async function submitClaimAction(input: unknown): Promise<{
           ok: false,
           message: "Invoice/Bill upload is required.",
         };
-      }
-
-      receiptFileHash = createHash("sha256").update(receiptFileBuffer).digest("hex");
-
-      const duplicateFileResult = await repository.existsExpenseByReceiptFileHash(receiptFileHash);
-      if (duplicateFileResult.errorMessage) {
-        return {
-          ok: false,
-          message: duplicateFileResult.errorMessage,
-        };
-      }
-
-      if (duplicateFileResult.exists) {
-        throw new DuplicateFileError("This exact receipt file has already been submitted.");
       }
 
       const duplicateTransactionResult = await repository.existsExpenseByCompositeKey({
@@ -589,10 +564,6 @@ export async function submitClaimAction(input: unknown): Promise<{
       }
 
       if (advanceReceiptFileBuffer && advanceReceiptFileName) {
-        advanceReceiptFileHash = createHash("sha256")
-          .update(advanceReceiptFileBuffer)
-          .digest("hex");
-
         const advanceUploadResult = await uploadClaimFile({
           folder: "petty_cash_requests",
           userId: currentUserResult.user.id,
@@ -612,14 +583,6 @@ export async function submitClaimAction(input: unknown): Promise<{
       }
     }
   } catch (error) {
-    if (error instanceof DuplicateFileError) {
-      return {
-        ok: false,
-        errorCode: "DUPLICATE_FILE",
-        message: error.message,
-      };
-    }
-
     if (error instanceof DuplicateTransactionError) {
       return {
         ok: false,
@@ -651,7 +614,7 @@ export async function submitClaimAction(input: unknown): Promise<{
     paymentModeId: parseResult.data.paymentModeId,
     assignedL2ApproverId: null,
     expense:
-      parseResult.data.detailType === "expense" && receiptFileHash
+      parseResult.data.detailType === "expense"
         ? {
             billNo: parseResult.data.expense.billNo,
             transactionId: parseResult.data.expense.transactionId,
@@ -669,7 +632,6 @@ export async function submitClaimAction(input: unknown): Promise<{
             totalAmount: parseResult.data.expense.totalAmount,
             currencyCode: parseResult.data.expense.currencyCode,
             vendorName: parseResult.data.expense.vendorName,
-            receiptFileHash,
             receiptFilePath: uploadedReceiptFilePath,
             bankStatementFilePath: uploadedBankStatementFilePath,
             peopleInvolved: parseResult.data.expense.peopleInvolved,
@@ -685,8 +647,6 @@ export async function submitClaimAction(input: unknown): Promise<{
             expectedUsageDate: parseResult.data.advance.expectedUsageDate ?? null,
             purpose: parseResult.data.advance.purpose,
             supportingDocumentPath: uploadedAdvanceSupportingFilePath,
-            supportingDocumentHash:
-              advanceReceiptFileHash ?? parseResult.data.advance.receiptFileHash ?? null,
             productId: parseResult.data.advance.productId,
             locationId: parseResult.data.advance.locationId,
             remarks: parseResult.data.advance.remarks,
@@ -829,13 +789,10 @@ export async function updateClaimByFinanceAction(input: {
   }
 
   let nextExpenseReceiptPath = claimSnapshotResult.data.expenseReceiptFilePath;
-  let nextExpenseReceiptHash = claimSnapshotResult.data.expenseReceiptFileHash;
   let nextAdvanceDocumentPath = claimSnapshotResult.data.advanceSupportingDocumentPath;
-  let nextAdvanceDocumentHash = claimSnapshotResult.data.advanceSupportingDocumentHash;
 
   if (parseResult.data.receiptFile && parseResult.data.receiptFile.size > 0) {
     const fileBuffer = Buffer.from(await parseResult.data.receiptFile.arrayBuffer());
-    const fileHash = createHash("sha256").update(fileBuffer).digest("hex");
 
     const uploadResult = await uploadClaimFile({
       folder: "expenses",
@@ -863,10 +820,8 @@ export async function updateClaimByFinanceAction(input: {
 
     if (parseResult.data.detailType === "expense") {
       nextExpenseReceiptPath = uploadResult.path;
-      nextExpenseReceiptHash = fileHash;
     } else {
       nextAdvanceDocumentPath = uploadResult.path;
-      nextAdvanceDocumentHash = fileHash;
     }
   }
 
@@ -883,7 +838,6 @@ export async function updateClaimByFinanceAction(input: {
       productId: parseResult.data.productId,
       remarks: parseResult.data.remarks,
       receiptFilePath: nextExpenseReceiptPath,
-      receiptFileHash: nextExpenseReceiptHash,
     };
   } else {
     financeEditPayload = {
@@ -892,7 +846,6 @@ export async function updateClaimByFinanceAction(input: {
       productId: parseResult.data.productId,
       remarks: parseResult.data.remarks,
       supportingDocumentPath: nextAdvanceDocumentPath,
-      supportingDocumentHash: nextAdvanceDocumentHash,
     };
   }
 

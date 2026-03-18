@@ -44,7 +44,7 @@ export function WalletSummary({ summary }: WalletSummaryProps) {
             {formatInr(summary.amountSpent)}
           </p>
           <p className="mt-2 text-xs text-amber-800/90 dark:text-amber-200/90">
-            Total Expense Claims Submitted (Finance Approved + Closed)
+            Total Petty Cash Utilized
           </p>
         </article>
 

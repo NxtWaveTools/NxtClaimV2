@@ -1,9 +1,5 @@
 alter table public.expense_details
-  add column if not exists receipt_file_hash text,
   add column if not exists transaction_id text;
-
-create index if not exists idx_expense_details_receipt_file_hash
-  on public.expense_details using btree (receipt_file_hash);
 
 create index if not exists idx_expense_details_bill_date_total_txn
   on public.expense_details using btree (bill_no, transaction_date, total_amount, transaction_id);
@@ -120,7 +116,6 @@ begin
       total_amount,
       currency_code,
       vendor_name,
-      receipt_file_hash,
       receipt_file_path,
       bank_statement_file_path,
       people_involved,
@@ -144,7 +139,6 @@ begin
       v_total_amount,
       coalesce(nullif(p_payload->'expense'->>'currency_code', ''), 'INR'),
       nullif(p_payload->'expense'->>'vendor_name', ''),
-      nullif(p_payload->'expense'->>'receipt_file_hash', ''),
       nullif(p_payload->'expense'->>'receipt_file_path', ''),
       nullif(p_payload->'expense'->>'bank_statement_file_path', ''),
       nullif(p_payload->'expense'->>'people_involved', ''),
@@ -186,6 +180,4 @@ grant execute on function public.create_claim_with_detail(jsonb) to authenticate
 -- Rollback guidance (execute manually when safe):
 -- 1) alter table public.expense_details drop constraint if exists uq_expense_details_bill_date_total_amount;
 -- 2) drop index if exists public.idx_expense_details_bill_date_total_txn;
--- 3) drop index if exists public.idx_expense_details_receipt_file_hash;
--- 4) alter table public.expense_details drop column if exists transaction_id;
--- 5) alter table public.expense_details drop column if exists receipt_file_hash;
+-- 3) alter table public.expense_details drop column if exists transaction_id;

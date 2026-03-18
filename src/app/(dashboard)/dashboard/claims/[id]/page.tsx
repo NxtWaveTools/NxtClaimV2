@@ -4,7 +4,6 @@ import { notFound } from "next/navigation";
 import { BackButton } from "@/components/ui/back-button";
 import { ROUTES } from "@/core/config/route-registry";
 import { DB_CLAIM_STATUSES } from "@/core/constants/statuses";
-import { getServiceRoleSupabaseClient } from "@/core/infra/supabase/server-client";
 import { SupabaseServerAuthRepository } from "@/modules/auth/repositories/supabase-server-auth.repository";
 import {
   approveClaimAction,
@@ -22,6 +21,7 @@ import { FinanceEditClaimForm } from "@/modules/claims/ui/finance-edit-claim-for
 
 type PageProps = {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ view?: string | string[] }>;
 };
 
 type EvidenceItem = {
@@ -69,22 +69,26 @@ function isRenderableEvidencePath(path: string | null | undefined): path is stri
 }
 
 async function resolveEvidenceUrls(
+  claimRepository: SupabaseClaimRepository,
   items: Array<{ label: string; path: string }>,
 ): Promise<EvidenceItem[]> {
-  const client = getServiceRoleSupabaseClient();
   const validItems = items.filter((item) => isRenderableEvidencePath(item.path));
 
   const resolved = await Promise.all(
     validItems.map(async (item) => {
-      const signed = await client.storage.from("claims").createSignedUrl(item.path, 60 * 10);
-      if (signed.error || !signed.data?.signedUrl) {
+      const signed = await claimRepository.getClaimEvidenceSignedUrl({
+        filePath: item.path,
+        expiresInSeconds: 60 * 10,
+      });
+
+      if (signed.errorMessage || !signed.data) {
         return null;
       }
 
       return {
         label: item.label,
         path: item.path,
-        signedUrl: signed.data.signedUrl,
+        signedUrl: signed.data,
       };
     }),
   );
@@ -92,8 +96,14 @@ async function resolveEvidenceUrls(
   return resolved.filter((item): item is EvidenceItem => item !== null);
 }
 
-export default async function ClaimDetailPage({ params }: PageProps) {
+export default async function ClaimDetailPage({ params, searchParams }: PageProps) {
   const resolvedParams = await params;
+  const resolvedSearchParams = await searchParams;
+  const viewParam = Array.isArray(resolvedSearchParams.view)
+    ? resolvedSearchParams.view[0]
+    : resolvedSearchParams.view;
+  const backHref =
+    viewParam === "approvals" ? `${ROUTES.claims.myClaims}?view=approvals` : ROUTES.claims.myClaims;
   const authRepository = new SupabaseServerAuthRepository();
   const claimRepository = new SupabaseClaimRepository();
 
@@ -183,7 +193,7 @@ export default async function ClaimDetailPage({ params }: PageProps) {
     evidencePaths.push({ label: "Bank Statement", path: claim.expense.bankStatementFilePath });
   }
 
-  const evidenceItems = await resolveEvidenceUrls(evidencePaths);
+  const evidenceItems = await resolveEvidenceUrls(claimRepository, evidencePaths);
 
   const approveFromDetail = async () => {
     "use server";
@@ -224,7 +234,7 @@ export default async function ClaimDetailPage({ params }: PageProps) {
   return (
     <div className="min-h-screen bg-slate-50 px-6 py-8 dark:bg-[#0B0F1A]">
       <main className="mx-auto max-w-7xl space-y-5">
-        <BackButton className="w-fit" />
+        <BackButton className="w-fit" fallbackHref={backHref} />
         <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm transition-colors dark:border-slate-800 dark:bg-zinc-950">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>

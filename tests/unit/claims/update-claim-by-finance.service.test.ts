@@ -26,9 +26,7 @@ function createRepository(
         detailType: "expense" as const,
         submittedBy: "employee-1",
         expenseReceiptFilePath: "expenses/employee-1/old_receipt.pdf",
-        expenseReceiptFileHash: "old-hash",
         advanceSupportingDocumentPath: null,
-        advanceSupportingDocumentHash: null,
       },
       errorMessage: null,
     })),
@@ -55,7 +53,6 @@ describe("UpdateClaimByFinanceService", () => {
         productId: "11111111-1111-4111-8111-111111111111",
         remarks: "Updated remarks",
         receiptFilePath: "expenses/employee-1/new_receipt.pdf",
-        receiptFileHash: "new-hash",
       },
     });
 
@@ -70,7 +67,6 @@ describe("UpdateClaimByFinanceService", () => {
       productId: "11111111-1111-4111-8111-111111111111",
       remarks: "Updated remarks",
       receiptFilePath: "expenses/employee-1/new_receipt.pdf",
-      receiptFileHash: "new-hash",
     });
   });
 
@@ -96,7 +92,6 @@ describe("UpdateClaimByFinanceService", () => {
         productId: null,
         remarks: null,
         receiptFilePath: null,
-        receiptFileHash: null,
       },
     });
 
@@ -113,9 +108,7 @@ describe("UpdateClaimByFinanceService", () => {
           detailType: "advance" as const,
           submittedBy: "employee-1",
           expenseReceiptFilePath: null,
-          expenseReceiptFileHash: null,
           advanceSupportingDocumentPath: "expenses/employee-1/advance.pdf",
-          advanceSupportingDocumentHash: "advance-hash",
         },
         errorMessage: null,
       })),
@@ -135,7 +128,6 @@ describe("UpdateClaimByFinanceService", () => {
         productId: null,
         remarks: null,
         receiptFilePath: null,
-        receiptFileHash: null,
       },
     });
 

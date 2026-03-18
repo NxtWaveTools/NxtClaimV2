@@ -10,7 +10,6 @@ import {
   type ClaimFormOptions,
   type CurrentUserHydration,
 } from "@/modules/claims/actions";
-import { ROUTES } from "@/core/config/route-registry";
 import { newClaimSubmitSchema } from "@/modules/claims/validators/new-claim-schema";
 
 type NewClaimFormClientProps = {
@@ -64,7 +63,6 @@ type ClaimFormDraftValues = {
     purpose: string;
     receiptFileName: string | null;
     receiptFileBase64: string | null;
-    receiptFileHash: string | null;
     productId: string | null;
     locationId: string | null;
     remarks: string | null;
@@ -213,7 +211,6 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
         purpose: "",
         receiptFileName: null,
         receiptFileBase64: null,
-        receiptFileHash: null,
         productId: null,
         locationId: null,
         remarks: null,
@@ -446,7 +443,6 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
       appendFormDataValue(formData, "advance.purpose", values.advance.purpose);
       appendFormDataValue(formData, "advance.receiptFileName", values.advance.receiptFileName);
       appendFormDataValue(formData, "advance.receiptFileBase64", values.advance.receiptFileBase64);
-      appendFormDataValue(formData, "advance.receiptFileHash", values.advance.receiptFileHash);
       appendFormDataValue(formData, "advance.productId", values.advance.productId);
       appendFormDataValue(formData, "advance.locationId", values.advance.locationId);
       appendFormDataValue(formData, "advance.remarks", values.advance.remarks);
@@ -457,16 +453,10 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
     }
 
     try {
-      let submitSucceeded = false;
-
-      await toast
-        .promise(
+      try {
+        await toast.promise(
           submitClaimAction(formData).then((result) => {
             if (!result.ok) {
-              if (result.errorCode === "DUPLICATE_FILE") {
-                throw new Error("This exact receipt file has already been submitted.");
-              }
-
               if (result.errorCode === "DUPLICATE_TRANSACTION") {
                 throw new Error(
                   "A claim with this exact Bill No, Date, and Amount already exists.",
@@ -483,16 +473,11 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
             success: "Claim submitted successfully!",
             error: (error) => (error instanceof Error ? error.message : "Failed to submit claim."),
           },
-        )
-        .then(() => {
-          submitSucceeded = true;
-        })
-        .catch(() => {
-          submitSucceeded = false;
-        });
+        );
 
-      if (submitSucceeded) {
-        router.push(ROUTES.claims.myClaims);
+        router.push("/dashboard/my-claims");
+      } catch {
+        // Toast already reports the failure; stay on form for correction.
       }
     } finally {
       setIsSubmitting(false);
@@ -561,7 +546,7 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
 
         <div className="grid gap-1">
           <label htmlFor="submissionType" className="text-sm font-medium text-slate-700">
-            Submission Type
+            Submission Type <span className="text-rose-600">*</span>
           </label>
           <select
             id="submissionType"
@@ -577,7 +562,7 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
           <>
             <div className="grid gap-1">
               <label htmlFor="onBehalfEmail" className="text-sm font-medium text-slate-700">
-                On Behalf Email
+                On Behalf Email (Required for On Behalf)
               </label>
               <input
                 id="onBehalfEmail"
@@ -594,7 +579,7 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
 
             <div className="grid gap-1">
               <label htmlFor="onBehalfEmployeeCode" className="text-sm font-medium text-slate-700">
-                On Behalf Employee ID
+                On Behalf Employee ID (Required for On Behalf)
               </label>
               <input
                 id="onBehalfEmployeeCode"
@@ -613,7 +598,7 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
 
         <div className="grid gap-1">
           <label htmlFor="departmentId" className="text-sm font-medium text-slate-700">
-            Department
+            Department <span className="text-rose-600">*</span>
           </label>
           <select
             id="departmentId"
@@ -634,7 +619,7 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
         <div className="grid gap-1 sm:grid-cols-2 sm:gap-4">
           <div className="grid gap-1">
             <label htmlFor="employeeId" className="text-sm font-medium text-slate-700">
-              Employee ID *
+              Employee ID <span className="text-rose-600">*</span>
             </label>
             <input
               id="employeeId"
@@ -649,7 +634,7 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
 
           <div className="grid gap-1">
             <label htmlFor="ccEmails" className="text-sm font-medium text-slate-700">
-              CC Emails
+              CC Emails (Optional)
             </label>
             <input
               id="ccEmails"
@@ -689,7 +674,7 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
 
         <div className="grid gap-1">
           <label htmlFor="paymentModeId" className="text-sm font-medium text-slate-700">
-            Payment Mode
+            Payment Mode <span className="text-rose-600">*</span>
           </label>
           <select
             id="paymentModeId"
@@ -717,7 +702,7 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
 
           <div className="grid gap-1">
             <label htmlFor="billNo" className="text-sm font-medium text-slate-700">
-              Bill No
+              Bill No <span className="text-rose-600">*</span>
             </label>
             <input
               id="billNo"
@@ -732,7 +717,7 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
 
           <div className="grid gap-1">
             <label htmlFor="transactionId" className="text-sm font-medium text-slate-700">
-              Transaction ID *
+              Transaction ID (Optional)
             </label>
             <input
               id="transactionId"
@@ -747,7 +732,7 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
 
           <div className="grid gap-1">
             <label htmlFor="expensePurpose" className="text-sm font-medium text-slate-700">
-              Purpose *
+              Purpose (Optional)
             </label>
             <input
               id="expensePurpose"
@@ -762,7 +747,7 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
 
           <div className="grid gap-1">
             <label htmlFor="expenseCategoryId" className="text-sm font-medium text-slate-700">
-              Expense Category
+              Expense Category <span className="text-rose-600">*</span>
             </label>
             <select
               id="expenseCategoryId"
@@ -780,7 +765,7 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="grid gap-1">
               <label htmlFor="expenseProductId" className="text-sm font-medium text-slate-700">
-                Product
+                Product <span className="text-rose-600">*</span>
               </label>
               <select
                 id="expenseProductId"
@@ -800,7 +785,7 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
 
             <div className="grid gap-1">
               <label htmlFor="expenseLocationId" className="text-sm font-medium text-slate-700">
-                Location
+                Location <span className="text-rose-600">*</span>
               </label>
               <select
                 id="expenseLocationId"
@@ -827,7 +812,7 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="grid gap-1">
                 <label htmlFor="gstNumber" className="text-sm font-medium text-slate-700">
-                  GST Number
+                  GST Number (Required when GST Applicable)
                 </label>
                 <input
                   id="gstNumber"
@@ -841,7 +826,7 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
 
               <div className="grid gap-1">
                 <label htmlFor="cgstAmount" className="text-sm font-medium text-slate-700">
-                  CGST Amount
+                  CGST Amount <span className="text-rose-600">*</span>
                 </label>
                 <input
                   id="cgstAmount"
@@ -854,7 +839,7 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
 
               <div className="grid gap-1">
                 <label htmlFor="sgstAmount" className="text-sm font-medium text-slate-700">
-                  SGST Amount
+                  SGST Amount <span className="text-rose-600">*</span>
                 </label>
                 <input
                   id="sgstAmount"
@@ -867,7 +852,7 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
 
               <div className="grid gap-1">
                 <label htmlFor="igstAmount" className="text-sm font-medium text-slate-700">
-                  IGST Amount
+                  IGST Amount <span className="text-rose-600">*</span>
                 </label>
                 <input
                   id="igstAmount"
@@ -883,7 +868,7 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="grid gap-1">
               <label htmlFor="transactionDate" className="text-sm font-medium text-slate-700">
-                Transaction Date
+                Transaction Date <span className="text-rose-600">*</span>
               </label>
               <input
                 id="transactionDate"
@@ -895,7 +880,7 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
 
             <div className="grid gap-1">
               <label htmlFor="basicAmount" className="text-sm font-medium text-slate-700">
-                Basic Amount *
+                Basic Amount <span className="text-rose-600">*</span>
               </label>
               <input
                 id="basicAmount"
@@ -912,7 +897,7 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
 
           <div className="grid gap-1">
             <label htmlFor="totalAmount" className="text-sm font-medium text-slate-700">
-              Total Amount *
+              Total Amount (Auto-calculated)
             </label>
             <input
               id="totalAmount"
@@ -975,7 +960,7 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="grid gap-1">
               <label htmlFor="receiptFile" className="text-sm font-medium text-slate-700">
-                Invoice/Bill (Required)
+                Invoice/Bill <span className="text-rose-600">*</span>
               </label>
               <input
                 id="receiptFile"
@@ -1154,7 +1139,7 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
 
           <div className="grid gap-1">
             <label htmlFor="purpose" className="text-sm font-medium text-slate-700">
-              Purpose/Reason <span className="text-rose-600">*</span>
+              Purpose/Reason (Optional)
             </label>
             <textarea
               id="purpose"

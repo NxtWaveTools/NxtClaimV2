@@ -208,7 +208,6 @@ begin
       total_amount,
       currency_code,
       vendor_name,
-      receipt_file_hash,
       receipt_file_path,
       bank_statement_file_path,
       people_involved,
@@ -232,7 +231,6 @@ begin
       v_total_amount,
       coalesce(nullif(p_payload->'expense'->>'currency_code', ''), 'INR'),
       nullif(p_payload->'expense'->>'vendor_name', ''),
-      nullif(p_payload->'expense'->>'receipt_file_hash', ''),
       nullif(p_payload->'expense'->>'receipt_file_path', ''),
       nullif(p_payload->'expense'->>'bank_statement_file_path', ''),
       nullif(p_payload->'expense'->>'people_involved', ''),
@@ -272,7 +270,6 @@ begin
       product_id,
       location_id,
       supporting_document_path,
-      supporting_document_hash,
       remarks
     )
     values (
@@ -285,7 +282,6 @@ begin
       nullif(p_payload->'advance'->>'product_id', '')::uuid,
       nullif(p_payload->'advance'->>'location_id', '')::uuid,
       nullif(p_payload->'advance'->>'supporting_document_path', ''),
-      nullif(p_payload->'advance'->>'supporting_document_hash', ''),
       nullif(p_payload->'advance'->>'remarks', '')
     );
   end if;

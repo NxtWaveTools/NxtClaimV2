@@ -77,12 +77,12 @@ async function fillRequiredExpenseFields(user: ReturnType<typeof userEvent.setup
   await user.type(screen.getByLabelText(/Employee ID/i), "EMP-100");
   await user.type(screen.getByLabelText(/Bill No/i), "BILL-100");
   await user.type(screen.getByLabelText(/Transaction ID/i), "TXN-100");
-  await user.type(screen.getByLabelText(/^Purpose \*/i), "Client visit");
+  await user.type(screen.getByLabelText(/Purpose \(Optional\)/i), "Client visit");
   await user.clear(screen.getByLabelText(/Basic Amount/i));
   await user.type(screen.getByLabelText(/Basic Amount/i), "100");
   await user.type(screen.getByLabelText(/Transaction Date/i), "2026-03-14");
   await user.upload(
-    screen.getByLabelText(/Invoice\/Bill \(Required\)/i),
+    screen.getByLabelText(/Invoice\/Bill/i),
     new File(["dummy"], "receipt.pdf", { type: "application/pdf" }),
   );
 }

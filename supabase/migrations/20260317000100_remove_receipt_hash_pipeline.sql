@@ -1,139 +1,10 @@
-begin;
+drop index if exists public.idx_expense_details_receipt_file_hash;
 
-drop policy if exists "submitters and approvers can read expense details" on public.expense_details;
-drop policy if exists "submitters and approvers can read advance details" on public.advance_details;
-drop policy if exists "submitters and approvers can read claims" on public.claims;
+alter table if exists public.expense_details
+  drop column if exists receipt_file_hash;
 
-alter table public.expense_details
-  drop constraint if exists expense_details_claim_id_fkey;
-
-alter table public.advance_details
-  drop constraint if exists advance_details_claim_id_fkey;
-
-alter table public.claims
-  alter column id drop default;
-
-alter table public.claims
-  alter column id type text using id::text;
-
-alter table public.expense_details
-  alter column claim_id type text using claim_id::text;
-
-alter table public.advance_details
-  alter column claim_id type text using claim_id::text;
-
-alter table public.expense_details
-create temporary table tmp_claim_id_map (
-  old_claim_id text primary key,
-  new_claim_id text not null unique
-) on commit drop;
-
-insert into tmp_claim_id_map (old_claim_id, new_claim_id)
-select
-  c.id as old_claim_id,
-  concat(
-    'CLAIM-',
-    regexp_replace(coalesce(nullif(trim(c.employee_id), ''), 'UNKNOWN'), '[^A-Za-z0-9]+', '', 'g'),
-    '-',
-    to_char(coalesce(c.submitted_at, c.created_at, now()), 'YYYYMMDD'),
-    '-',
-    lpad(
-      row_number() over (
-        partition by
-          coalesce(nullif(trim(c.employee_id), ''), 'UNKNOWN'),
-          date(coalesce(c.submitted_at, c.created_at, now()))
-        order by coalesce(c.submitted_at, c.created_at), c.id
-      )::text,
-      4,
-      '0'
-    )
-  ) as new_claim_id
-from public.claims c;
-
-update public.claims c
-set id = m.new_claim_id
-from tmp_claim_id_map m
-where c.id = m.old_claim_id;
-
-update public.expense_details e
-set claim_id = m.new_claim_id
-from tmp_claim_id_map m
-where e.claim_id = m.old_claim_id;
-
-update public.advance_details a
-set claim_id = m.new_claim_id
-from tmp_claim_id_map m
-where a.claim_id = m.old_claim_id;
-
-alter table public.expense_details
-  add constraint expense_details_claim_id_fkey
-  foreign key (claim_id) references public.claims(id) on delete restrict;
-
-alter table public.advance_details
-  add constraint advance_details_claim_id_fkey
-  foreign key (claim_id) references public.claims(id) on delete restrict;
-
-create policy "submitters and approvers can read claims"
-on public.claims
-for select
-to authenticated
-using (
-  (auth.uid() = submitted_by)
-  or (auth.uid() = assigned_l1_approver_id)
-  or exists (
-    select 1
-    from public.master_finance_approvers mfa
-    where mfa.id = claims.assigned_l2_approver_id
-      and mfa.user_id = auth.uid()
-      and mfa.is_active = true
-  )
-);
-
-create policy "submitters and approvers can read expense details"
-on public.expense_details
-for select
-to authenticated
-using (
-  exists (
-    select 1
-    from public.claims c
-    where c.id = expense_details.claim_id
-      and (
-        auth.uid() = c.submitted_by
-        or auth.uid() = c.assigned_l1_approver_id
-        or exists (
-          select 1
-          from public.master_finance_approvers mfa
-          where mfa.id = c.assigned_l2_approver_id
-            and mfa.user_id = auth.uid()
-            and mfa.is_active = true
-        )
-      )
-  )
-);
-
-create policy "submitters and approvers can read advance details"
-on public.advance_details
-for select
-to authenticated
-using (
-  exists (
-    select 1
-    from public.claims c
-    where c.id = advance_details.claim_id
-      and (
-        auth.uid() = c.submitted_by
-        or auth.uid() = c.assigned_l1_approver_id
-        or exists (
-          select 1
-          from public.master_finance_approvers mfa
-          where mfa.id = c.assigned_l2_approver_id
-            and mfa.user_id = auth.uid()
-            and mfa.is_active = true
-        )
-      )
-  )
-);
+alter table if exists public.advance_details
+  drop column if exists supporting_document_hash;
 
 drop function if exists public.create_claim_with_detail(jsonb);
 
@@ -145,6 +16,7 @@ set search_path = public
 as $$
 declare
   v_claim_id text;
+  v_initial_status public.claim_status;
   v_payment_mode_name text;
   v_expected_detail_type text;
   v_detail_type text;
@@ -157,7 +29,6 @@ declare
   v_advance_requested_amount numeric;
   v_advance_budget_month integer;
   v_advance_budget_year integer;
-  v_advance_purpose text;
 begin
   v_claim_id := nullif(trim(p_payload->>'claim_id'), '');
 
@@ -168,6 +39,11 @@ begin
   if v_claim_id !~ '^CLAIM-[A-Za-z0-9]+-[0-9]{8}-[A-Za-z0-9]+$' then
     raise exception 'claim_id % does not match required format', v_claim_id;
   end if;
+
+  v_initial_status := coalesce(
+    nullif(trim(p_payload->>'initial_status'), '')::public.claim_status,
+    'Submitted - Awaiting HOD approval'::public.claim_status
+  );
 
   select name into v_payment_mode_name
   from public.master_payment_modes
@@ -197,6 +73,7 @@ begin
     submission_type,
     detail_type,
     submitted_by,
+    on_behalf_of_id,
     on_behalf_email,
     on_behalf_employee_code,
     department_id,
@@ -208,12 +85,13 @@ begin
   )
   values (
     v_claim_id,
-    'Submitted - Awaiting HOD approval',
+    v_initial_status,
     p_payload->>'submission_type',
     v_detail_type,
     (p_payload->>'submitted_by')::uuid,
-    p_payload->>'on_behalf_email',
-    p_payload->>'on_behalf_employee_code',
+    (p_payload->>'on_behalf_of_id')::uuid,
+    coalesce(nullif(trim(p_payload->>'on_behalf_email'), ''), 'N/A'),
+    coalesce(nullif(trim(p_payload->>'on_behalf_employee_code'), ''), 'N/A'),
     (p_payload->>'department_id')::uuid,
     (p_payload->>'payment_mode_id')::uuid,
     (p_payload->>'assigned_l1_approver_id')::uuid,
@@ -257,25 +135,25 @@ begin
     values (
       v_claim_id,
       p_payload->'expense'->>'bill_no',
-      nullif(p_payload->'expense'->>'transaction_id', ''),
+      coalesce(nullif(trim(p_payload->'expense'->>'transaction_id'), ''), 'N/A'),
       (p_payload->'expense'->>'expense_category_id')::uuid,
       nullif(p_payload->'expense'->>'product_id', '')::uuid,
       (p_payload->'expense'->>'location_id')::uuid,
-      coalesce(nullif(p_payload->'expense'->>'purpose', ''), 'General Expense'),
+      coalesce(nullif(trim(p_payload->'expense'->>'purpose'), ''), 'N/A'),
       v_is_gst_applicable,
-      nullif(p_payload->'expense'->>'gst_number', ''),
+      coalesce(nullif(trim(p_payload->'expense'->>'gst_number'), ''), 'N/A'),
       v_cgst_amount,
       v_sgst_amount,
       v_igst_amount,
       (p_payload->'expense'->>'transaction_date')::date,
       v_basic_amount,
       v_total_amount,
-      coalesce(nullif(p_payload->'expense'->>'currency_code', ''), 'INR'),
-      nullif(p_payload->'expense'->>'vendor_name', ''),
-      nullif(p_payload->'expense'->>'receipt_file_path', ''),
-      nullif(p_payload->'expense'->>'bank_statement_file_path', ''),
-      nullif(p_payload->'expense'->>'people_involved', ''),
-      nullif(p_payload->'expense'->>'remarks', '')
+      coalesce(nullif(trim(p_payload->'expense'->>'currency_code'), ''), 'INR'),
+      coalesce(nullif(trim(p_payload->'expense'->>'vendor_name'), ''), 'N/A'),
+      coalesce(nullif(trim(p_payload->'expense'->>'receipt_file_path'), ''), 'N/A'),
+      coalesce(nullif(trim(p_payload->'expense'->>'bank_statement_file_path'), ''), 'N/A'),
+      coalesce(nullif(trim(p_payload->'expense'->>'people_involved'), ''), 'N/A'),
+      coalesce(nullif(trim(p_payload->'expense'->>'remarks'), ''), 'N/A')
     );
   end if;
 
@@ -283,7 +161,6 @@ begin
     v_advance_requested_amount := (p_payload->'advance'->>'requested_amount')::numeric;
     v_advance_budget_month := (p_payload->'advance'->>'budget_month')::integer;
     v_advance_budget_year := (p_payload->'advance'->>'budget_year')::integer;
-    v_advance_purpose := nullif(trim(coalesce(p_payload->'advance'->>'purpose', '')), '');
 
     if v_advance_requested_amount is null then
       raise exception 'Advance requested_amount is required';
@@ -296,9 +173,6 @@ begin
     end if;
     if v_advance_budget_year is null then
       raise exception 'Advance budget_year is required';
-    end if;
-    if v_advance_purpose is null then
-      raise exception 'Advance purpose is required';
     end if;
 
     insert into public.advance_details (
@@ -319,11 +193,11 @@ begin
       v_advance_budget_month,
       v_advance_budget_year,
       nullif(p_payload->'advance'->>'expected_usage_date', '')::date,
-      v_advance_purpose,
+      coalesce(nullif(trim(p_payload->'advance'->>'purpose'), ''), 'N/A'),
       nullif(p_payload->'advance'->>'product_id', '')::uuid,
       nullif(p_payload->'advance'->>'location_id', '')::uuid,
-      nullif(p_payload->'advance'->>'supporting_document_path', ''),
-      nullif(p_payload->'advance'->>'remarks', '')
+      coalesce(nullif(trim(p_payload->'advance'->>'supporting_document_path'), ''), 'N/A'),
+      coalesce(nullif(trim(p_payload->'advance'->>'remarks'), ''), 'N/A')
     );
   end if;
 
@@ -331,4 +205,4 @@ begin
 end;
 $$;
 
-commit;
+grant execute on function public.create_claim_with_detail(jsonb) to authenticated;

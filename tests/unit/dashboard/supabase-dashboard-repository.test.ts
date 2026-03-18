@@ -116,7 +116,7 @@ describe("SupabaseDashboardRepository.getClosedWalletBaseTotals", () => {
                 error: null,
               }).then(onFulfilled, onRejected);
             },
-          })) as unknown as jest.Mock;
+          }));
 
           return builder;
         }

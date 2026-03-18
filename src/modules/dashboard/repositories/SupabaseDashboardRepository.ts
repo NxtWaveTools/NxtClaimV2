@@ -94,16 +94,17 @@ export class SupabaseDashboardRepository implements DashboardRepository {
   }> {
     const client = getServiceRoleSupabaseClient();
 
-    const { data: modeRows, error: modeError } = await runWithSingleRetry(() =>
-      client
-        .from("master_payment_modes")
-        .select("id, name")
-        .in("name", [
-          PAYMENT_MODE_PETTY_CASH_REQUEST,
-          PAYMENT_MODE_BULK_PETTY_CASH_REQUEST,
-          PAYMENT_MODE_PETTY_CASH,
-          PAYMENT_MODE_REIMBURSEMENT,
-        ]),
+    const { data: modeRows, error: modeError } = await runWithSingleRetry(
+      async () =>
+        await client
+          .from("master_payment_modes")
+          .select("id, name")
+          .in("name", [
+            PAYMENT_MODE_PETTY_CASH_REQUEST,
+            PAYMENT_MODE_BULK_PETTY_CASH_REQUEST,
+            PAYMENT_MODE_PETTY_CASH,
+            PAYMENT_MODE_REIMBURSEMENT,
+          ]),
     );
 
     if (modeError) {
@@ -196,7 +197,7 @@ export class SupabaseDashboardRepository implements DashboardRepository {
       query = query.in("status", normalizedStatuses);
     }
 
-    const result = await runWithSingleRetry(() => query);
+    const result = await runWithSingleRetry(async () => await query);
 
     if (result.error) {
       return { total: 0, errorMessage: result.error.message };
@@ -239,7 +240,7 @@ export class SupabaseDashboardRepository implements DashboardRepository {
       query = query.in("status", normalizedStatuses);
     }
 
-    const result = await runWithSingleRetry(() => query);
+    const result = await runWithSingleRetry(async () => await query);
 
     if (result.error) {
       return { total: 0, errorMessage: result.error.message };

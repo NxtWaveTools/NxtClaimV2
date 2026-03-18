@@ -37,14 +37,13 @@ function createRepository(overrides?: Partial<ClaimRepository>): ClaimRepository
     },
   ];
 
-  return {
+  const repository: ClaimRepository = {
     getActivePaymentModes: jest.fn(async () => ({ data: [], errorMessage: null })),
     getActiveDepartments: jest.fn(async () => ({ data: [], errorMessage: null })),
     getActiveExpenseCategories: jest.fn(async () => ({ data: [], errorMessage: null })),
     getActiveProducts: jest.fn(async () => ({ data: [], errorMessage: null })),
     getActiveLocations: jest.fn(async () => ({ data: [], errorMessage: null })),
     getUserSummary: jest.fn(async () => ({ data: null, errorMessage: null })),
-    existsExpenseByReceiptFileHash: jest.fn(async () => ({ exists: false, errorMessage: null })),
     existsExpenseByCompositeKey: jest.fn(async () => ({ exists: false, errorMessage: null })),
     getPaymentModeById: jest.fn(async () => ({ data: null, errorMessage: null })),
     getDepartmentApprovers: jest.fn(async () => ({ data: null, errorMessage: null })),
@@ -54,9 +53,36 @@ function createRepository(overrides?: Partial<ClaimRepository>): ClaimRepository
       errorMessage: null,
     })),
     createClaimWithDetail: jest.fn(async () => ({ claimId: null, errorMessage: null })),
+    getClaimForFinanceEdit: jest.fn(async () => ({ data: null, errorMessage: null })),
+    updateClaimDetailsByFinance: jest.fn(async () => ({ errorMessage: null })),
     getMyClaims: jest.fn(async () => ({ data: defaultRows, errorMessage: null })),
-    ...overrides,
+    getMyClaimsPaginated: jest.fn(async () => ({
+      data: [],
+      nextCursor: null,
+      hasNextPage: false,
+      errorMessage: null,
+    })),
+    getApprovalViewerContext: jest.fn(async () => ({
+      data: { isHod: false, isFounder: false, isFinance: false },
+      errorMessage: null,
+    })),
+    getPendingApprovalsForL1: jest.fn(async () => ({
+      data: [],
+      nextCursor: null,
+      hasNextPage: false,
+      errorMessage: null,
+    })),
+    getPendingApprovalsForFinance: jest.fn(async () => ({
+      data: [],
+      nextCursor: null,
+      hasNextPage: false,
+      errorMessage: null,
+    })),
+    getClaimsForExport: jest.fn(async () => ({ data: [], errorMessage: null })),
+    getClaimEvidenceSignedUrl: jest.fn(async () => ({ data: null, errorMessage: null })),
   };
+
+  return { ...repository, ...(overrides ?? {}) };
 }
 
 describe("GetMyClaimsService", () => {

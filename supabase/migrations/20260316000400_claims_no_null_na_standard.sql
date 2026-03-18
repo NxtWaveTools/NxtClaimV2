@@ -158,7 +158,6 @@ BEGIN
       total_amount,
       currency_code,
       vendor_name,
-      receipt_file_hash,
       receipt_file_path,
       bank_statement_file_path,
       people_involved,
@@ -182,7 +181,6 @@ BEGIN
       v_total_amount,
       coalesce(nullif(trim(p_payload->'expense'->>'currency_code'), ''), 'INR'),
       coalesce(nullif(trim(p_payload->'expense'->>'vendor_name'), ''), 'N/A'),
-      coalesce(nullif(trim(p_payload->'expense'->>'receipt_file_hash'), ''), 'N/A'),
       coalesce(nullif(trim(p_payload->'expense'->>'receipt_file_path'), ''), 'N/A'),
       coalesce(nullif(trim(p_payload->'expense'->>'bank_statement_file_path'), ''), 'N/A'),
       coalesce(nullif(trim(p_payload->'expense'->>'people_involved'), ''), 'N/A'),
@@ -218,7 +216,6 @@ BEGIN
       product_id,
       location_id,
       supporting_document_path,
-      supporting_document_hash,
       remarks
     )
     VALUES (
@@ -231,7 +228,6 @@ BEGIN
       nullif(p_payload->'advance'->>'product_id', '')::uuid,
       nullif(p_payload->'advance'->>'location_id', '')::uuid,
       coalesce(nullif(trim(p_payload->'advance'->>'supporting_document_path'), ''), 'N/A'),
-      coalesce(nullif(trim(p_payload->'advance'->>'supporting_document_hash'), ''), 'N/A'),
       coalesce(nullif(trim(p_payload->'advance'->>'remarks'), ''), 'N/A')
     );
   END IF;
