@@ -18,10 +18,13 @@ function LoginPageContent() {
   const params = useSearchParams();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const queryErrorCode = params.get("error");
   const queryError =
-    params.get("error") === "unauthorized_domain"
+    queryErrorCode === "unauthorized_domain"
       ? "Your email domain is not authorized for this workspace."
-      : null;
+      : queryErrorCode === "sso-failed"
+        ? "Microsoft sign-in failed. Please try again."
+        : null;
 
   useEffect(() => {
     let isMounted = true;
