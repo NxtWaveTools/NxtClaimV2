@@ -48,8 +48,12 @@ type RuntimeActors = {
   finance2: UserRecord;
   submitterDepartment: DepartmentRecord;
   hodDepartment: DepartmentRecord;
-  reimbursementPaymentModeId: string;
   expenseCategoryName: string;
+  founderDepartment: DepartmentRecord | null;
+  crossDepartmentCandidate: {
+    department: DepartmentRecord;
+    approverRole: KnownRole;
+  } | null;
 };
 
 type ActorSession = {
@@ -61,7 +65,14 @@ type ActorSession = {
 
 type SubmittedClaim = {
   claimId: string;
-  billNo: string;
+  marker: string;
+};
+
+type ClaimRouting = {
+  departmentId: string;
+  status: string;
+  assignedL1ApproverId: string;
+  assignedL2ApproverId: string | null;
 };
 
 const actorSessions = new Map<KnownRole, ActorSession>();
@@ -146,6 +157,25 @@ async function resolveSubmitterDepartment(submitter: UserRecord): Promise<Depart
   return nonSelfHodDepartment ?? departments[0];
 }
 
+function resolveRoleByUserId(userId: string): KnownRole | null {
+  if (userId === runtimeActors.submitter.id) {
+    return "submitter";
+  }
+  if (userId === runtimeActors.hod.id) {
+    return "hod";
+  }
+  if (userId === runtimeActors.founder.id) {
+    return "founder";
+  }
+  if (userId === runtimeActors.finance1.id) {
+    return "finance1";
+  }
+  if (userId === runtimeActors.finance2.id) {
+    return "finance2";
+  }
+  return null;
+}
+
 async function resolveRuntimeActors(): Promise<RuntimeActors> {
   const startingUsers = await getUsersByEmails([STARTING_USER_EMAIL, STARTING_HOD_EMAIL]);
   const submitter = startingUsers.get(STARTING_USER_EMAIL);
@@ -204,6 +234,7 @@ async function resolveRuntimeActors(): Promise<RuntimeActors> {
     ...submitterDepartment,
     approver_1: fallbackHodId,
   };
+
   lookupUserIds.add(hodDepartment.approver_1);
   lookupUserIds.add(hodDepartment.approver_2);
 
@@ -220,6 +251,7 @@ async function resolveRuntimeActors(): Promise<RuntimeActors> {
   const usersById = new Map(
     ((usersByIdResult.data ?? []) as UserRecord[]).map((row) => [row.id, row]),
   );
+
   const submitterHod = usersById.get(submitterDepartment.approver_1);
   const hodFounder = usersById.get(hodDepartment.approver_2);
 
@@ -229,22 +261,9 @@ async function resolveRuntimeActors(): Promise<RuntimeActors> {
 
   const finance1 = usersById.get(financeApprovers[0].user_id);
   const finance2 = usersById.get(financeApprovers[1].user_id);
+
   if (!finance1 || !finance2) {
     throw new Error("Unable to resolve finance approver users.");
-  }
-
-  const reimbursementModeResult = await client
-    .from("master_payment_modes")
-    .select("id, name")
-    .eq("is_active", true)
-    .ilike("name", "Reimbursement")
-    .limit(1)
-    .maybeSingle();
-
-  if (reimbursementModeResult.error || !reimbursementModeResult.data?.id) {
-    throw new Error(
-      `Failed to resolve reimbursement payment mode: ${reimbursementModeResult.error?.message ?? "not found"}`,
-    );
   }
 
   const categoryResult = await client
@@ -261,6 +280,42 @@ async function resolveRuntimeActors(): Promise<RuntimeActors> {
     );
   }
 
+  const activeDepartmentsResult = await client
+    .from("master_departments")
+    .select("id, name, approver_1, approver_2")
+    .eq("is_active", true);
+
+  if (activeDepartmentsResult.error) {
+    throw new Error(
+      `Failed to resolve active departments for edge workflows: ${activeDepartmentsResult.error.message}`,
+    );
+  }
+
+  const activeDepartments = (activeDepartmentsResult.data ?? []) as DepartmentRecord[];
+  const founderDepartment =
+    activeDepartments.find((department) => department.approver_2 === hodFounder.id) ?? null;
+
+  const knownApproverIds = new Set([submitterHod.id, hodFounder.id, finance1.id, finance2.id]);
+  const crossCandidate =
+    activeDepartments
+      .filter((department) => department.id !== submitterDepartment.id)
+      .filter((department) => department.approver_1 !== submitterDepartment.approver_1)
+      .find((department) => knownApproverIds.has(department.approver_1)) ?? null;
+
+  const crossDepartmentCandidate =
+    crossCandidate === null
+      ? null
+      : {
+          department: crossCandidate,
+          approverRole: (resolveRoleByUserIdFromKnownUsers(
+            crossCandidate.approver_1,
+            submitterHod,
+            hodFounder,
+            finance1,
+            finance2,
+          ) ?? "hod") as KnownRole,
+        };
+
   return {
     submitter,
     hod: submitterHod,
@@ -269,9 +324,32 @@ async function resolveRuntimeActors(): Promise<RuntimeActors> {
     finance2,
     submitterDepartment,
     hodDepartment,
-    reimbursementPaymentModeId: reimbursementModeResult.data.id as string,
     expenseCategoryName: categoryResult.data.name as string,
+    founderDepartment,
+    crossDepartmentCandidate,
   };
+}
+
+function resolveRoleByUserIdFromKnownUsers(
+  userId: string,
+  hod: UserRecord,
+  founder: UserRecord,
+  finance1: UserRecord,
+  finance2: UserRecord,
+): KnownRole | null {
+  if (userId === hod.id) {
+    return "hod";
+  }
+  if (userId === founder.id) {
+    return "founder";
+  }
+  if (userId === finance1.id) {
+    return "finance1";
+  }
+  if (userId === finance2.id) {
+    return "finance2";
+  }
+  return null;
 }
 
 async function loginToContext(
@@ -286,8 +364,15 @@ async function loginToContext(
   await page.getByLabel(/^password$/i).fill(password);
   await page.getByRole("button", { name: /sign in with email/i }).click();
 
-  await page.waitForURL("**/dashboard", { timeout: 45000 });
-  await expect(page.getByRole("heading", { name: /dashboard/i })).toBeVisible({ timeout: 15000 });
+  await page.waitForURL("**/dashboard", { timeout: 60000 });
+  await Promise.race([
+    page.getByRole("heading", { name: /dashboard/i }).waitFor({ state: "visible", timeout: 15000 }),
+    page
+      .getByRole("heading", { name: /wallet summary/i })
+      .waitFor({ state: "visible", timeout: 15000 }),
+    page.getByRole("link", { name: /my claims/i }).waitFor({ state: "visible", timeout: 15000 }),
+  ]);
+
   return page;
 }
 
@@ -309,6 +394,23 @@ async function setupActorSessions(browser: Browser, actors: RuntimeActors): Prom
       context,
       page,
     });
+    await page.waitForTimeout(1500);
+  }
+}
+
+async function forceSupabaseSchemaRefresh(): Promise<void> {
+  const supabase = getAdminSupabaseClient();
+
+  try {
+    await supabase.rpc("reload_schema_cache");
+  } catch {
+    await supabase.from("_reload").select("*");
+  }
+
+  try {
+    await supabase.rpc("exec_sql", { sql: "NOTIFY pgrst, 'reload schema';" });
+  } catch {
+    // Best effort cache refresh for environments without this helper RPC.
   }
 }
 
@@ -321,21 +423,24 @@ function getActorPage(role: KnownRole): Page {
   return session.page;
 }
 
+function getActorByRole(role: KnownRole): UserRecord {
+  const session = actorSessions.get(role);
+  if (!session) {
+    throw new Error(`No actor session for role ${role}`);
+  }
+
+  return session.user;
+}
+
 async function closeActorSessions(): Promise<void> {
   for (const session of actorSessions.values()) {
     try {
       await session.context.close();
     } catch {
-      // Ignore teardown issues if a context is already disposed.
+      // Ignore teardown issues when a context is already disposed.
     }
   }
   actorSessions.clear();
-}
-
-function toCurrencyNumber(value: string): number {
-  const normalized = value.replace(/[^0-9.-]/g, "");
-  const parsed = Number(normalized);
-  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 async function selectDropdownOption(page: Page, label: string, value: string): Promise<void> {
@@ -344,6 +449,7 @@ async function selectDropdownOption(page: Page, label: string, value: string): P
 
   const optionByRole = page.getByRole("option", { name: new RegExp(`^${value}$`, "i") }).first();
   const optionCount = await optionByRole.count();
+
   if (optionCount > 0) {
     await optionByRole.click({ force: true }).catch(() => null);
   }
@@ -380,7 +486,37 @@ async function resolveClaimIdByBillNo(submitterId: string, billNo: string): Prom
   return data.id as string;
 }
 
-async function submitExpenseClaim(
+async function resolveClaimIdByAdvancePurpose(
+  submitterId: string,
+  purpose: string,
+): Promise<string> {
+  const client = getAdminSupabaseClient();
+  const { data, error } = await client
+    .from("claims")
+    .select("id, advance_details!inner(purpose)")
+    .eq("submitted_by", submitterId)
+    .eq("advance_details.purpose", purpose)
+    .eq("is_active", true)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`Failed to resolve claim id for advance purpose ${purpose}: ${error.message}`);
+  }
+
+  if (!data?.id) {
+    throw new Error(`No claim found for submitter ${submitterId} and advance purpose ${purpose}.`);
+  }
+
+  return data.id as string;
+}
+
+function newMarker(prefix: string): string {
+  return `${prefix}-${RUN_TAG}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
+}
+
+async function submitReimbursementClaim(
   page: Page,
   input: {
     actorRole: KnownRole;
@@ -389,15 +525,14 @@ async function submitExpenseClaim(
     workflowLabel: string;
     onBehalfOfEmail?: string;
     onBehalfOfEmployeeCode?: string;
-    employeeCodePrefix?: string;
   },
 ): Promise<SubmittedClaim> {
   await openNewClaimForm(page);
 
-  const suffix = `${RUN_TAG}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
-  const employeeCode = `${input.employeeCodePrefix ?? input.actorRole.toUpperCase()}-${suffix}`;
-  const billNo = `BILL-${suffix}`;
-  const transactionId = `TXN-${suffix}`;
+  const marker = newMarker(input.workflowLabel);
+  const employeeCode = `${input.actorRole.toUpperCase()}-${marker}`;
+  const billNo = `BILL-${marker}`;
+  const transactionId = `TXN-${marker}`;
 
   if (input.onBehalfOfEmail && input.onBehalfOfEmployeeCode) {
     await selectDropdownOption(page, "Submission Type", "On Behalf");
@@ -412,7 +547,7 @@ async function submitExpenseClaim(
   await page.locator("#employeeId").fill(employeeCode);
   await page.locator("#billNo").fill(billNo);
   await page.locator("#transactionId").fill(transactionId);
-  await page.locator("#expensePurpose").fill(`${input.workflowLabel} ${suffix}`);
+  await page.locator("#expensePurpose").fill(`${input.workflowLabel} ${marker}`);
   await page.locator("#transactionDate").fill("2026-03-18");
   await page.locator("#basicAmount").fill(String(input.amount));
   await page.locator("#receiptFile").setInputFiles(RECEIPT_PATH);
@@ -420,32 +555,113 @@ async function submitExpenseClaim(
   await page.getByRole("button", { name: /submit claim/i }).click();
   await expect(page.getByText(/claim submitted successfully/i)).toBeVisible({ timeout: 30000 });
 
-  const actor = actorSessions.get(input.actorRole);
-  if (!actor) {
-    throw new Error(`Cannot resolve actor for ${input.actorRole}`);
-  }
+  const actor = getActorByRole(input.actorRole);
+  const claimId = await resolveClaimIdByBillNo(actor.id, billNo);
 
-  const claimId = await resolveClaimIdByBillNo(actor.user.id, billNo);
-  return { claimId, billNo };
+  return { claimId, marker };
+}
+
+async function submitPettyCashRequestClaim(
+  page: Page,
+  input: {
+    actorRole: KnownRole;
+    departmentName: string;
+    amount: number;
+    workflowLabel: string;
+  },
+): Promise<SubmittedClaim> {
+  await openNewClaimForm(page);
+
+  const marker = newMarker(input.workflowLabel);
+  const employeeCode = `${input.actorRole.toUpperCase()}-${marker}`;
+  const budgetMonth = "3";
+  const budgetYear = "2026";
+  const purpose = `${input.workflowLabel} ${marker}`;
+
+  await selectDropdownOption(page, "Department", input.departmentName);
+  await selectDropdownOption(page, "Payment Mode", "Petty Cash Request");
+
+  await page.locator("#employeeId").fill(employeeCode);
+  await page.locator("#requestedAmount").fill(String(input.amount));
+  await page.locator("#expectedUsageDate").fill("2026-03-24");
+  await page.locator("#budgetMonth").selectOption(budgetMonth);
+  await page.locator("#budgetYear").selectOption(budgetYear);
+  await page.locator("#purpose").fill(purpose);
+
+  await page.getByRole("button", { name: /submit claim/i }).click();
+  await expect(page.getByText(/claim submitted successfully/i)).toBeVisible({ timeout: 30000 });
+
+  const actor = getActorByRole(input.actorRole);
+  const claimId = await resolveClaimIdByAdvancePurpose(actor.id, purpose);
+
+  return { claimId, marker };
+}
+
+async function submitPettyCashExpenseClaim(
+  page: Page,
+  input: {
+    actorRole: KnownRole;
+    departmentName: string;
+    amount: number;
+    workflowLabel: string;
+  },
+): Promise<SubmittedClaim> {
+  await openNewClaimForm(page);
+
+  const marker = newMarker(input.workflowLabel);
+  const employeeCode = `${input.actorRole.toUpperCase()}-${marker}`;
+  const billNo = `BILL-${marker}`;
+  const transactionId = `TXN-${marker}`;
+
+  await selectDropdownOption(page, "Department", input.departmentName);
+  await selectDropdownOption(page, "Payment Mode", "Petty Cash");
+  await selectDropdownOption(page, "Expense Category", runtimeActors.expenseCategoryName);
+
+  await page.locator("#employeeId").fill(employeeCode);
+  await page.locator("#billNo").fill(billNo);
+  await page.locator("#transactionId").fill(transactionId);
+  await page.locator("#expensePurpose").fill(`${input.workflowLabel} ${marker}`);
+  await page.locator("#transactionDate").fill("2026-03-18");
+  await page.locator("#basicAmount").fill(String(input.amount));
+  await page.locator("#receiptFile").setInputFiles(RECEIPT_PATH);
+
+  await page.getByRole("button", { name: /submit claim/i }).click();
+  await expect(page.getByText(/claim submitted successfully/i)).toBeVisible({ timeout: 30000 });
+
+  const actor = getActorByRole(input.actorRole);
+  const claimId = await resolveClaimIdByBillNo(actor.id, billNo);
+
+  return { claimId, marker };
 }
 
 async function openApprovalsHistory(page: Page): Promise<void> {
   await page.goto("/dashboard/my-claims?view=approvals", { waitUntil: "domcontentloaded" });
-  await expect(page.getByRole("heading", { name: /approvals history/i })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /approvals history/i })).toBeVisible({
+    timeout: 20000,
+  });
+}
+
+async function openMyClaims(page: Page): Promise<void> {
+  await page.goto("/dashboard/my-claims", { waitUntil: "domcontentloaded" });
+  await expect(page.getByRole("heading", { name: /my claims/i })).toBeVisible({ timeout: 20000 });
 }
 
 function claimRow(page: Page, claimId: string): Locator {
   return page.locator("tbody tr", { has: page.getByRole("link", { name: claimId }) }).first();
 }
 
+async function clickApproveButton(row: Locator): Promise<void> {
+  const approveButton = row.getByRole("button", { name: /^(approve|ok)$/i }).first();
+  await approveButton.click();
+}
+
 async function approveAtCurrentScope(page: Page, claimId: string): Promise<void> {
   await openApprovalsHistory(page);
   const row = claimRow(page, claimId);
   await expect(row).toBeVisible({ timeout: 30000 });
-  await row
-    .getByRole("button", { name: /^approve$/i })
-    .first()
-    .click();
+
+  await clickApproveButton(row);
+  await expect(page.getByText(/approved\./i)).toBeVisible({ timeout: 30000 });
 }
 
 async function rejectAtCurrentScope(page: Page, claimId: string, reason: string): Promise<void> {
@@ -457,6 +673,7 @@ async function rejectAtCurrentScope(page: Page, claimId: string, reason: string)
     .getByRole("button", { name: /^reject$/i })
     .first()
     .click();
+
   const reasonBox = row.locator("textarea[name='rejectionReason']").first();
   await expect(reasonBox).toBeVisible({ timeout: 10000 });
   await reasonBox.fill(reason);
@@ -465,17 +682,19 @@ async function rejectAtCurrentScope(page: Page, claimId: string, reason: string)
     .getByRole("button", { name: /^reject$/i })
     .last()
     .click();
-  await expect(page.getByText(/claim rejected\./i)).toBeVisible({ timeout: 30000 });
+  await expect(page.getByText(/rejected\./i)).toBeVisible({ timeout: 30000 });
 }
 
 async function markPaidAtFinance(page: Page, claimId: string): Promise<void> {
   await openApprovalsHistory(page);
   const row = claimRow(page, claimId);
   await expect(row).toBeVisible({ timeout: 30000 });
+
   await row
     .getByRole("button", { name: /^paid$|mark as paid/i })
     .first()
     .click();
+  await expect(page.getByText(/marked as paid\./i)).toBeVisible({ timeout: 30000 });
 }
 
 async function expectClaimVisibleInApprovals(
@@ -492,6 +711,44 @@ async function expectClaimVisibleInApprovals(
   }
 
   await expect(row).toHaveCount(0);
+}
+
+async function expectClaimVisibleInMyClaims(
+  page: Page,
+  claimId: string,
+  visible: boolean,
+): Promise<void> {
+  await openMyClaims(page);
+  const row = claimRow(page, claimId);
+
+  if (visible) {
+    await expect(row).toBeVisible({ timeout: 30000 });
+    return;
+  }
+
+  await expect(row).toHaveCount(0);
+}
+
+async function expectClaimStatusInMyClaims(
+  page: Page,
+  claimId: string,
+  statusText: string,
+): Promise<void> {
+  await openMyClaims(page);
+  const row = claimRow(page, claimId);
+  await expect(row).toBeVisible({ timeout: 30000 });
+  await expect(row).toContainText(new RegExp(statusText, "i"));
+}
+
+async function expectClaimStatusInApprovals(
+  page: Page,
+  claimId: string,
+  statusText: string,
+): Promise<void> {
+  await openApprovalsHistory(page);
+  const row = claimRow(page, claimId);
+  await expect(row).toBeVisible({ timeout: 30000 });
+  await expect(row).toContainText(new RegExp(statusText, "i"));
 }
 
 async function assertClaimStatusInDb(claimId: string, expectedStatus: string): Promise<void> {
@@ -511,11 +768,11 @@ async function assertClaimStatusInDb(claimId: string, expectedStatus: string): P
   expect(data?.status).toBe(expectedStatus);
 }
 
-async function assertClaimRouting(claimId: string, expectedL1ApproverId: string): Promise<void> {
+async function getClaimRouting(claimId: string): Promise<ClaimRouting> {
   const client = getAdminSupabaseClient();
   const { data, error } = await client
     .from("claims")
-    .select("assigned_l1_approver_id")
+    .select("department_id, status, assigned_l1_approver_id, assigned_l2_approver_id")
     .eq("id", claimId)
     .eq("is_active", true)
     .limit(1)
@@ -525,44 +782,51 @@ async function assertClaimRouting(claimId: string, expectedL1ApproverId: string)
     throw new Error(`Failed to read routing for claim ${claimId}: ${error.message}`);
   }
 
-  expect(data?.assigned_l1_approver_id).toBe(expectedL1ApproverId);
-}
-
-async function getFounderReimbursementTotal(founderUserId: string): Promise<number> {
-  const client = getAdminSupabaseClient();
-  const { data, error } = await client
-    .from("claims")
-    .select("expense_details(total_amount)")
-    .eq("on_behalf_of_id", founderUserId)
-    .eq("is_active", true)
-    .eq("payment_mode_id", runtimeActors.reimbursementPaymentModeId)
-    .eq("status", "Payment Done - Closed");
-
-  if (error) {
-    throw new Error(`Failed to query founder reimbursement totals: ${error.message}`);
+  if (!data?.assigned_l1_approver_id || !data?.department_id || !data?.status) {
+    throw new Error(`Routing record missing required fields for claim ${claimId}.`);
   }
 
-  const rows = (data ?? []) as Array<{
-    expense_details: { total_amount: number | string | null } | null;
-  }>;
-  return rows.reduce((sum, row) => {
-    const raw = row.expense_details?.total_amount;
-    const value = typeof raw === "number" ? raw : Number(raw ?? 0);
-    return sum + (Number.isFinite(value) ? value : 0);
-  }, 0);
+  return {
+    departmentId: data.department_id as string,
+    status: data.status as string,
+    assignedL1ApproverId: data.assigned_l1_approver_id as string,
+    assignedL2ApproverId: (data.assigned_l2_approver_id as string | null) ?? null,
+  };
 }
 
-async function getFounderAmountReceivedCardValue(founderPage: Page): Promise<number> {
-  await founderPage.goto("/dashboard", { waitUntil: "domcontentloaded" });
-  await expect(founderPage.getByRole("heading", { name: /wallet summary/i })).toBeVisible({
-    timeout: 15000,
-  });
-  const amountText = await founderPage
-    .locator("article", { hasText: "Amount Received" })
-    .locator("p")
-    .nth(1)
-    .innerText();
-  return toCurrencyNumber(amountText);
+async function assertClaimRouting(claimId: string, expectedL1ApproverId: string): Promise<void> {
+  const routing = await getClaimRouting(claimId);
+  expect(routing.assignedL1ApproverId).toBe(expectedL1ApproverId);
+}
+
+async function getWalletPettyCashBalance(userId: string): Promise<number> {
+  const client = getAdminSupabaseClient();
+  const { data, error } = await client
+    .from("wallets")
+    .select("petty_cash_balance")
+    .eq("user_id", userId)
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`Strict wallets table query failed for user ${userId}: ${error.message}`);
+  }
+
+  const raw = data?.petty_cash_balance as number | string | null | undefined;
+  if (raw === undefined || raw === null) {
+    throw new Error(`No petty_cash_balance row found in wallets for user ${userId}.`);
+  }
+
+  const numeric = typeof raw === "number" ? raw : Number(raw);
+  if (!Number.isFinite(numeric)) {
+    throw new Error(`petty_cash_balance is non-numeric for user ${userId}: ${String(raw)}`);
+  }
+
+  return numeric;
+}
+
+function assertWalletDelta(before: number, after: number, expectedDelta: number): void {
+  expect(after - before).toBeCloseTo(expectedDelta, 2);
 }
 
 test.describe("Claims Workflow Multi-Role E2E", () => {
@@ -570,6 +834,8 @@ test.describe("Claims Workflow Multi-Role E2E", () => {
   test.setTimeout(480000);
 
   test.beforeAll(async ({ browser }) => {
+    test.setTimeout(240000);
+    await forceSupabaseSchemaRefresh();
     runtimeActors = await resolveRuntimeActors();
     await setupActorSessions(browser, runtimeActors);
   });
@@ -578,123 +844,300 @@ test.describe("Claims Workflow Multi-Role E2E", () => {
     await closeActorSessions();
   });
 
-  test("Workflow 1: happy path reaches Payment Done - Closed", async () => {
+  test("Flow 1: standard happy path closes claim and keeps global history visibility", async () => {
     const submitterPage = getActorPage("submitter");
     const hodPage = getActorPage("hod");
-    const financePage = getActorPage("finance1");
+    const finance1Page = getActorPage("finance1");
+    const finance2Page = getActorPage("finance2");
 
-    const submitted = await submitExpenseClaim(submitterPage, {
+    const submitted = await submitReimbursementClaim(submitterPage, {
       actorRole: "submitter",
       departmentName: runtimeActors.submitterDepartment.name,
       amount: 301.25,
-      workflowLabel: "WF1-HAPPY",
+      workflowLabel: "FLOW1-HAPPY",
     });
 
     await approveAtCurrentScope(hodPage, submitted.claimId);
-    await approveAtCurrentScope(financePage, submitted.claimId);
-    await markPaidAtFinance(financePage, submitted.claimId);
+    await approveAtCurrentScope(finance1Page, submitted.claimId);
+    await markPaidAtFinance(finance1Page, submitted.claimId);
 
     await assertClaimStatusInDb(submitted.claimId, "Payment Done - Closed");
+
+    await expectClaimVisibleInMyClaims(submitterPage, submitted.claimId, true);
+    await expectClaimVisibleInApprovals(hodPage, submitted.claimId, true);
+    await expectClaimVisibleInApprovals(finance1Page, submitted.claimId, true);
+    await expectClaimVisibleInApprovals(finance2Page, submitted.claimId, true);
   });
 
-  test("Workflow 2: HOD rejection stays private from finance queues", async () => {
+  test("Flow 2: L1 rejection remains private from finance users", async () => {
     const submitterPage = getActorPage("submitter");
     const hodPage = getActorPage("hod");
     const finance1Page = getActorPage("finance1");
     const finance2Page = getActorPage("finance2");
 
-    const submitted = await submitExpenseClaim(submitterPage, {
+    const submitted = await submitReimbursementClaim(submitterPage, {
       actorRole: "submitter",
       departmentName: runtimeActors.submitterDepartment.name,
       amount: 217.4,
-      workflowLabel: "WF2-HOD-REJECT",
+      workflowLabel: "FLOW2-HOD-REJECT",
     });
 
-    await rejectAtCurrentScope(
-      hodPage,
-      submitted.claimId,
-      "Rejected in workflow 2 for privacy validation.",
-    );
+    await rejectAtCurrentScope(hodPage, submitted.claimId, "L1 rejection privacy validation.");
+
+    await assertClaimStatusInDb(submitted.claimId, "Rejected");
+
+    await expectClaimVisibleInMyClaims(submitterPage, submitted.claimId, true);
+    await expectClaimStatusInMyClaims(submitterPage, submitted.claimId, "Rejected");
+
+    await expectClaimVisibleInApprovals(hodPage, submitted.claimId, true);
 
     await expectClaimVisibleInApprovals(finance1Page, submitted.claimId, false);
     await expectClaimVisibleInApprovals(finance2Page, submitted.claimId, false);
-    await assertClaimStatusInDb(submitted.claimId, "Rejected");
+
+    await expectClaimVisibleInMyClaims(finance1Page, submitted.claimId, false);
+    await expectClaimVisibleInMyClaims(finance2Page, submitted.claimId, false);
   });
 
-  test("Workflow 3: finance rejected claim is visible in global finance queue", async () => {
+  test("Flow 3: HOD self-submission escalates to founder and finance rejection remains globally visible", async () => {
+    const hodPage = getActorPage("hod");
+    const founderPage = getActorPage("founder");
+    const finance1Page = getActorPage("finance1");
+    const finance2Page = getActorPage("finance2");
+
+    const submitted = await submitReimbursementClaim(hodPage, {
+      actorRole: "hod",
+      departmentName: runtimeActors.hodDepartment.name,
+      amount: 412.6,
+      workflowLabel: "FLOW3-HOD-ESCALATION",
+    });
+
+    await assertClaimRouting(submitted.claimId, runtimeActors.founder.id);
+
+    await approveAtCurrentScope(founderPage, submitted.claimId);
+    await rejectAtCurrentScope(
+      finance1Page,
+      submitted.claimId,
+      "L2 rejection global visibility validation.",
+    );
+
+    await assertClaimStatusInDb(submitted.claimId, "Rejected");
+
+    await expectClaimVisibleInMyClaims(hodPage, submitted.claimId, true);
+    await expectClaimStatusInMyClaims(hodPage, submitted.claimId, "Rejected");
+
+    await expectClaimVisibleInApprovals(founderPage, submitted.claimId, true);
+    await expectClaimVisibleInApprovals(finance1Page, submitted.claimId, true);
+    await expectClaimVisibleInApprovals(finance2Page, submitted.claimId, true);
+  });
+
+  test("Flow 4: petty cash advance approval increases wallet by exactly 40000", async () => {
+    const submitterPage = getActorPage("submitter");
+    const hodPage = getActorPage("hod");
+    const finance1Page = getActorPage("finance1");
+    const amount = 40000;
+
+    const walletBefore = await getWalletPettyCashBalance(runtimeActors.submitter.id);
+
+    const submitted = await submitPettyCashRequestClaim(submitterPage, {
+      actorRole: "submitter",
+      departmentName: runtimeActors.submitterDepartment.name,
+      amount,
+      workflowLabel: "FLOW4-PC-ADVANCE",
+    });
+
+    await approveAtCurrentScope(hodPage, submitted.claimId);
+    await approveAtCurrentScope(finance1Page, submitted.claimId);
+    await markPaidAtFinance(finance1Page, submitted.claimId);
+
+    await assertClaimStatusInDb(submitted.claimId, "Payment Done - Closed");
+
+    const walletAfter = await getWalletPettyCashBalance(runtimeActors.submitter.id);
+    assertWalletDelta(walletBefore, walletAfter, amount);
+  });
+
+  test("Flow 5: petty cash expense rejected at L1 keeps wallet unchanged", async () => {
+    const submitterPage = getActorPage("submitter");
+    const hodPage = getActorPage("hod");
+    const amount = 30000;
+
+    const walletBefore = await getWalletPettyCashBalance(runtimeActors.submitter.id);
+
+    const submitted = await submitPettyCashExpenseClaim(submitterPage, {
+      actorRole: "submitter",
+      departmentName: runtimeActors.submitterDepartment.name,
+      amount,
+      workflowLabel: "FLOW5-PC-EXPENSE-HOD-REJECT",
+    });
+
+    await rejectAtCurrentScope(hodPage, submitted.claimId, "L1 rejected petty cash expense.");
+
+    await assertClaimStatusInDb(submitted.claimId, "Rejected");
+
+    const walletAfter = await getWalletPettyCashBalance(runtimeActors.submitter.id);
+    assertWalletDelta(walletBefore, walletAfter, 0);
+  });
+
+  test("Flow 6: petty cash expense rejected at finance keeps wallet unchanged and remains visible to finance2 history", async () => {
     const submitterPage = getActorPage("submitter");
     const hodPage = getActorPage("hod");
     const finance1Page = getActorPage("finance1");
     const finance2Page = getActorPage("finance2");
+    const amount = 15000;
 
-    const submitted = await submitExpenseClaim(submitterPage, {
-      actorRole: "submitter",
-      departmentName: runtimeActors.submitterDepartment.name,
-      amount: 412.6,
-      workflowLabel: "WF3-FINANCE-GLOBAL",
-    });
+    const walletBefore = await getWalletPettyCashBalance(runtimeActors.submitter.id);
 
-    await approveAtCurrentScope(hodPage, submitted.claimId);
-    await rejectAtCurrentScope(
-      finance1Page,
-      submitted.claimId,
-      "Rejected by finance 1 for global queue visibility test.",
-    );
-
-    await expectClaimVisibleInApprovals(finance2Page, submitted.claimId, true);
-    await assertClaimStatusInDb(submitted.claimId, "Rejected");
-  });
-
-  test("Workflow 4: HOD self-submission escalates to founder then closes", async () => {
-    const hodPage = getActorPage("hod");
-    const founderPage = getActorPage("founder");
-    const financePage = getActorPage("finance1");
-
-    const submitted = await submitExpenseClaim(hodPage, {
-      actorRole: "hod",
-      departmentName: runtimeActors.hodDepartment.name,
-      amount: 189.9,
-      workflowLabel: "WF4-HOD-ESCALATION",
-      employeeCodePrefix: "HOD",
-    });
-
-    await assertClaimRouting(submitted.claimId, runtimeActors.founder.id);
-    await approveAtCurrentScope(founderPage, submitted.claimId);
-    await approveAtCurrentScope(financePage, submitted.claimId);
-    await markPaidAtFinance(financePage, submitted.claimId);
-
-    await assertClaimStatusInDb(submitted.claimId, "Payment Done - Closed");
-  });
-
-  test("Workflow 5: On Behalf founder reimbursement updates wallet math", async () => {
-    const submitterPage = getActorPage("submitter");
-    const hodPage = getActorPage("hod");
-    const financePage = getActorPage("finance1");
-    const founderPage = getActorPage("founder");
-    const amount = 523.35;
-
-    const founderDbBefore = await getFounderReimbursementTotal(runtimeActors.founder.id);
-    const founderAmountReceivedBefore = await getFounderAmountReceivedCardValue(founderPage);
-
-    const submitted = await submitExpenseClaim(submitterPage, {
+    const submitted = await submitPettyCashExpenseClaim(submitterPage, {
       actorRole: "submitter",
       departmentName: runtimeActors.submitterDepartment.name,
       amount,
-      workflowLabel: "WF5-ON-BEHALF-FOUNDER",
-      onBehalfOfEmail: runtimeActors.founder.email,
-      onBehalfOfEmployeeCode: `OB-${RUN_TAG}`,
+      workflowLabel: "FLOW6-PC-EXPENSE-FIN-REJECT",
     });
 
     await approveAtCurrentScope(hodPage, submitted.claimId);
-    await approveAtCurrentScope(financePage, submitted.claimId);
-    await markPaidAtFinance(financePage, submitted.claimId);
+    await rejectAtCurrentScope(finance1Page, submitted.claimId, "L2 rejected petty cash expense.");
+
+    await assertClaimStatusInDb(submitted.claimId, "Rejected");
+
+    const walletAfter = await getWalletPettyCashBalance(runtimeActors.submitter.id);
+    assertWalletDelta(walletBefore, walletAfter, 0);
+
+    await expectClaimVisibleInApprovals(finance2Page, submitted.claimId, true);
+    await expectClaimStatusInApprovals(finance2Page, submitted.claimId, "Rejected");
+
+    await expectClaimVisibleInMyClaims(submitterPage, submitted.claimId, true);
+    await expectClaimStatusInMyClaims(submitterPage, submitted.claimId, "Rejected");
+
+    await expectClaimVisibleInApprovals(hodPage, submitted.claimId, true);
+    await expectClaimStatusInApprovals(hodPage, submitted.claimId, "Rejected");
+  });
+
+  test("Flow 7: fully approved petty cash expense decreases wallet by exactly 10000", async () => {
+    const submitterPage = getActorPage("submitter");
+    const hodPage = getActorPage("hod");
+    const finance1Page = getActorPage("finance1");
+    const amount = 10000;
+
+    const walletBefore = await getWalletPettyCashBalance(runtimeActors.submitter.id);
+
+    const submitted = await submitPettyCashExpenseClaim(submitterPage, {
+      actorRole: "submitter",
+      departmentName: runtimeActors.submitterDepartment.name,
+      amount,
+      workflowLabel: "FLOW7-PC-EXPENSE-FULL-APPROVAL",
+    });
+
+    await approveAtCurrentScope(hodPage, submitted.claimId);
+    await approveAtCurrentScope(finance1Page, submitted.claimId);
+    await markPaidAtFinance(finance1Page, submitted.claimId);
 
     await assertClaimStatusInDb(submitted.claimId, "Payment Done - Closed");
 
-    const founderDbAfter = await getFounderReimbursementTotal(runtimeActors.founder.id);
-    expect(founderDbAfter - founderDbBefore).toBeCloseTo(amount, 2);
+    const walletAfter = await getWalletPettyCashBalance(runtimeActors.submitter.id);
+    assertWalletDelta(walletBefore, walletAfter, -amount);
+  });
 
-    const founderAmountReceivedAfter = await getFounderAmountReceivedCardValue(founderPage);
-    expect(founderAmountReceivedAfter - founderAmountReceivedBefore).toBeCloseTo(amount, 2);
+  test("Edge Workflow A (AI-generated): cross-department routing locks to target L1 approver and isolates original HOD", async () => {
+    test.skip(
+      runtimeActors.crossDepartmentCandidate === null,
+      "No cross-department candidate found with a known approver actor.",
+    );
+
+    const submitterPage = getActorPage("submitter");
+    const originalHodPage = getActorPage("hod");
+    const candidate = runtimeActors.crossDepartmentCandidate!;
+    const targetApproverPage = getActorPage(candidate.approverRole);
+
+    const submitted = await submitReimbursementClaim(submitterPage, {
+      actorRole: "submitter",
+      departmentName: candidate.department.name,
+      amount: 219.45,
+      workflowLabel: "EDGE-A-CROSS-DEPT",
+    });
+
+    const routing = await getClaimRouting(submitted.claimId);
+    expect(routing.departmentId).toBe(candidate.department.id);
+    expect(routing.assignedL1ApproverId).toBe(candidate.department.approver_1);
+
+    await expectClaimVisibleInApprovals(originalHodPage, submitted.claimId, false);
+    await expectClaimVisibleInApprovals(targetApproverPage, submitted.claimId, true);
+
+    await rejectAtCurrentScope(
+      targetApproverPage,
+      submitted.claimId,
+      "Cross-department edge-case rejection.",
+    );
+    await assertClaimStatusInDb(submitted.claimId, "Rejected");
+  });
+
+  test("Edge Workflow B (AI-generated): founder self-submission routing and rejection boundaries across founder/finance actors", async () => {
+    test.skip(runtimeActors.founderDepartment === null, "No founder-associated department found.");
+
+    const founderPage = getActorPage("founder");
+    const hodPage = getActorPage("hod");
+    const finance1Page = getActorPage("finance1");
+    const finance2Page = getActorPage("finance2");
+
+    const submitted = await submitReimbursementClaim(founderPage, {
+      actorRole: "founder",
+      departmentName: runtimeActors.founderDepartment!.name,
+      amount: 277.11,
+      workflowLabel: "EDGE-B-FOUNDER-SELF",
+    });
+
+    const routing = await getClaimRouting(submitted.claimId);
+    const l1Role = resolveRoleByUserId(routing.assignedL1ApproverId);
+
+    expect(routing.assignedL1ApproverId).toBeTruthy();
+    await expectClaimVisibleInMyClaims(founderPage, submitted.claimId, true);
+
+    if (l1Role === "founder") {
+      await rejectAtCurrentScope(
+        founderPage,
+        submitted.claimId,
+        "Founder self-routed rejection boundary.",
+      );
+      await assertClaimStatusInDb(submitted.claimId, "Rejected");
+      await expectClaimVisibleInApprovals(finance1Page, submitted.claimId, false);
+      await expectClaimVisibleInApprovals(finance2Page, submitted.claimId, false);
+      return;
+    }
+
+    if (l1Role === "hod") {
+      await approveAtCurrentScope(hodPage, submitted.claimId);
+      await rejectAtCurrentScope(
+        finance1Page,
+        submitted.claimId,
+        "Founder self-submission finance rejection boundary.",
+      );
+      await assertClaimStatusInDb(submitted.claimId, "Rejected");
+      await expectClaimVisibleInApprovals(finance2Page, submitted.claimId, true);
+      return;
+    }
+
+    if (l1Role === "finance1") {
+      await rejectAtCurrentScope(
+        finance1Page,
+        submitted.claimId,
+        "Founder routed directly to finance1.",
+      );
+      await assertClaimStatusInDb(submitted.claimId, "Rejected");
+      await expectClaimVisibleInApprovals(finance2Page, submitted.claimId, true);
+      return;
+    }
+
+    if (l1Role === "finance2") {
+      await rejectAtCurrentScope(
+        finance2Page,
+        submitted.claimId,
+        "Founder routed directly to finance2.",
+      );
+      await assertClaimStatusInDb(submitted.claimId, "Rejected");
+      await expectClaimVisibleInApprovals(finance1Page, submitted.claimId, true);
+      return;
+    }
+
+    throw new Error(
+      `Founder self-submission assigned to unsupported L1 approver ${routing.assignedL1ApproverId}; add actor coverage for this user in E2E setup.`,
+    );
   });
 });

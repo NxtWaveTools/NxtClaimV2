@@ -8,12 +8,12 @@ export type WalletSummaryTotals = {
 };
 
 export type DashboardRepository = {
-  getClosedWalletBaseTotals(userId: string): Promise<{
+  getWalletTotals(userId: string): Promise<{
     data: {
       totalPettyCashReceived: number;
       totalPettyCashSpent: number;
       totalReimbursements: number;
-      totalExpenseSubmitted: number;
+      pettyCashBalance: number;
     } | null;
     errorMessage: string | null;
   }>;

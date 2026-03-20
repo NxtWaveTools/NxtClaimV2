@@ -143,6 +143,30 @@ type ClaimL2DecisionRow = {
   assigned_l2_approver_id: string | null;
 };
 
+type ClaimWalletUpdateExpenseRow = {
+  total_amount: number | string | null;
+};
+
+type ClaimWalletUpdateAdvanceRow = {
+  requested_amount: number | string | null;
+};
+
+type ClaimWalletUpdateRow = {
+  id: string;
+  on_behalf_of_id: string;
+  detail_type: "expense" | "advance";
+  master_payment_modes: ClaimRelationNameRow | ClaimRelationNameRow[] | null;
+  expense_details: ClaimWalletUpdateExpenseRow | ClaimWalletUpdateExpenseRow[] | null;
+  advance_details: ClaimWalletUpdateAdvanceRow | ClaimWalletUpdateAdvanceRow[] | null;
+};
+
+type WalletRow = {
+  id: string;
+  total_reimbursements_received: number | string | null;
+  total_petty_cash_received: number | string | null;
+  total_petty_cash_spent: number | string | null;
+};
+
 type ClaimDetailExpenseRow = {
   bill_no: string;
   purpose: string | null;
@@ -248,6 +272,12 @@ function toNumber(value: number | string | null | undefined): number | null {
 }
 
 const FINANCE_CLOSED_STATUSES: DbClaimStatus[] = [DB_CLAIM_STATUSES[2], DB_CLAIM_STATUSES[3]];
+
+const PAYMENT_DONE_CLOSED_STATUS = DB_CLAIM_STATUSES[3];
+const PAYMENT_MODE_REIMBURSEMENT = "reimbursement";
+const PAYMENT_MODE_PETTY_CASH = "petty cash";
+const PAYMENT_MODE_PETTY_CASH_REQUEST = "petty cash request";
+const PAYMENT_MODE_BULK_PETTY_CASH_REQUEST = "bulk petty cash request";
 
 const FINANCE_NON_REJECTED_VISIBLE_STATUSES: DbClaimStatus[] = [
   DB_CLAIM_STATUSES[1],
@@ -385,6 +415,114 @@ function buildMyClaimsOwnershipWithCursorOrFilter(userId: string, cursor: Claims
 }
 
 export class SupabaseClaimRepository implements ClaimRepository {
+  private async updateWalletTotalsForClosedClaim(
+    claimId: string,
+  ): Promise<{ errorMessage: string | null }> {
+    const client = getServiceRoleSupabaseClient();
+
+    const { data: claimData, error: claimError } = await client
+      .from("claims")
+      .select(
+        "id, on_behalf_of_id, detail_type, master_payment_modes(name), expense_details(total_amount), advance_details(requested_amount)",
+      )
+      .eq("id", claimId)
+      .eq("is_active", true)
+      .maybeSingle();
+
+    if (claimError) {
+      return { errorMessage: claimError.message };
+    }
+
+    if (!claimData) {
+      return { errorMessage: "Claim not found for wallet update." };
+    }
+
+    const claim = claimData as ClaimWalletUpdateRow;
+    const paymentModeName =
+      getSingleRelation(claim.master_payment_modes)?.name?.trim().toLowerCase() ?? "";
+
+    const expense = getSingleRelation(claim.expense_details);
+    const advance = getSingleRelation(claim.advance_details);
+
+    let incrementColumn:
+      | "total_reimbursements_received"
+      | "total_petty_cash_received"
+      | "total_petty_cash_spent"
+      | null = null;
+
+    let incrementAmount = 0;
+
+    if (paymentModeName === PAYMENT_MODE_REIMBURSEMENT) {
+      incrementColumn = "total_reimbursements_received";
+      incrementAmount = toNumber(expense?.total_amount) ?? 0;
+    } else if (
+      paymentModeName === PAYMENT_MODE_PETTY_CASH_REQUEST ||
+      paymentModeName === PAYMENT_MODE_BULK_PETTY_CASH_REQUEST
+    ) {
+      incrementColumn = "total_petty_cash_received";
+      incrementAmount = toNumber(advance?.requested_amount) ?? 0;
+    } else if (paymentModeName === PAYMENT_MODE_PETTY_CASH) {
+      incrementColumn = "total_petty_cash_spent";
+      incrementAmount = toNumber(expense?.total_amount) ?? 0;
+    }
+
+    if (!incrementColumn || incrementAmount <= 0) {
+      return { errorMessage: null };
+    }
+
+    const { data: walletData, error: walletReadError } = await client
+      .from("wallets")
+      .select(
+        "id, total_reimbursements_received, total_petty_cash_received, total_petty_cash_spent",
+      )
+      .eq("user_id", claim.on_behalf_of_id)
+      .maybeSingle();
+
+    if (walletReadError && walletReadError.code !== "PGRST116") {
+      return { errorMessage: walletReadError.message };
+    }
+
+    const wallet = (walletData as WalletRow | null) ?? null;
+
+    const nextTotals = {
+      total_reimbursements_received:
+        toNumber(wallet?.total_reimbursements_received) +
+        (incrementColumn === "total_reimbursements_received" ? incrementAmount : 0),
+      total_petty_cash_received:
+        toNumber(wallet?.total_petty_cash_received) +
+        (incrementColumn === "total_petty_cash_received" ? incrementAmount : 0),
+      total_petty_cash_spent:
+        toNumber(wallet?.total_petty_cash_spent) +
+        (incrementColumn === "total_petty_cash_spent" ? incrementAmount : 0),
+    };
+
+    if (!wallet) {
+      const { error: insertError } = await client.from("wallets").insert({
+        user_id: claim.on_behalf_of_id,
+        total_reimbursements_received: nextTotals.total_reimbursements_received,
+        total_petty_cash_received: nextTotals.total_petty_cash_received,
+        total_petty_cash_spent: nextTotals.total_petty_cash_spent,
+      });
+
+      if (insertError) {
+        return { errorMessage: insertError.message };
+      }
+
+      return { errorMessage: null };
+    }
+
+    const { error: updateWalletError } = await client
+      .from("wallets")
+      .update(nextTotals)
+      .eq("id", wallet.id);
+
+    if (updateWalletError) {
+      return { errorMessage: updateWalletError.message };
+    }
+
+    return { errorMessage: null };
+  }
+
   async getClaimEvidenceSignedUrl(input: {
     filePath: string;
     expiresInSeconds: number;
@@ -558,6 +696,13 @@ export class SupabaseClaimRepository implements ClaimRepository {
 
     if (error) {
       return { errorMessage: error.message };
+    }
+
+    if (input.status === PAYMENT_DONE_CLOSED_STATUS) {
+      const walletUpdateResult = await this.updateWalletTotalsForClosedClaim(input.claimId);
+      if (walletUpdateResult.errorMessage) {
+        return { errorMessage: walletUpdateResult.errorMessage };
+      }
     }
 
     return { errorMessage: null };

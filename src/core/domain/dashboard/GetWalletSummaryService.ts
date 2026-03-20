@@ -47,7 +47,7 @@ export class GetWalletSummaryService {
   async execute(
     userId: string,
   ): Promise<{ data: WalletSummaryTotals | null; errorMessage: string | null }> {
-    const result = await this.repository.getClosedWalletBaseTotals(userId);
+    const result = await this.repository.getWalletTotals(userId);
 
     if (result.errorMessage || !result.data) {
       this.logger.error("dashboard.wallet_summary.failed", {
@@ -65,7 +65,7 @@ export class GetWalletSummaryService {
       assertNonNegativeLedger("totalPettyCashReceived", result.data.totalPettyCashReceived);
       assertNonNegativeLedger("totalPettyCashSpent", result.data.totalPettyCashSpent);
       assertNonNegativeLedger("totalReimbursements", result.data.totalReimbursements);
-      assertNonNegativeLedger("totalExpenseSubmitted", result.data.totalExpenseSubmitted);
+      assertNonNegativeLedger("pettyCashBalance", result.data.pettyCashBalance);
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : "Ledger integrity validation failed.";
@@ -86,7 +86,7 @@ export class GetWalletSummaryService {
     const totalReimbursements = roundCurrency(result.data.totalReimbursements);
     const amountReceived = roundCurrency(totalPettyCashReceived + totalReimbursements);
     const amountSpent = totalPettyCashSpent;
-    const pettyCashBalance = roundCurrency(totalPettyCashReceived - totalPettyCashSpent);
+    const pettyCashBalance = roundCurrency(result.data.pettyCashBalance);
 
     const summary: WalletSummaryTotals = {
       totalPettyCashReceived,
