@@ -3,7 +3,6 @@ import { z } from "zod";
 import { DB_CLAIM_STATUSES, type DbClaimStatus } from "@/core/constants/statuses";
 import type {
   ClaimDateTarget,
-  ClaimDetailType,
   ClaimSearchField,
   ClaimSubmissionType,
   ClaimsExportFetchScope,
@@ -19,14 +18,6 @@ const EXPORT_BATCH_SIZE = 500;
 const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
 
 const scopeSchema = z.enum(["submissions", "approvals"]);
-
-function normalizeDetailType(value: string | null): ClaimDetailType | undefined {
-  if (value === "expense" || value === "advance") {
-    return value;
-  }
-
-  return undefined;
-}
 
 function normalizeSubmissionType(value: string | null): ClaimSubmissionType | undefined {
   if (value === "Self" || value === "On Behalf") {
@@ -81,10 +72,17 @@ function normalizeStatusFilter(value: string | null): DbClaimStatus[] | undefine
 function buildClaimFilters(searchParams: URLSearchParams): GetMyClaimsFilters {
   const searchQueryRaw = searchParams.get("search_query")?.trim();
   const paymentModeIdRaw = searchParams.get("payment_mode_id")?.trim();
+  const departmentIdRaw = searchParams.get("department_id")?.trim();
+  const locationIdRaw = searchParams.get("location_id")?.trim();
+  const productIdRaw = searchParams.get("product_id")?.trim();
+  const expenseCategoryIdRaw = searchParams.get("expense_category_id")?.trim();
 
   return {
     paymentModeId: paymentModeIdRaw ? paymentModeIdRaw : undefined,
-    detailType: normalizeDetailType(searchParams.get("detail_type")),
+    departmentId: departmentIdRaw ? departmentIdRaw : undefined,
+    locationId: locationIdRaw ? locationIdRaw : undefined,
+    productId: productIdRaw ? productIdRaw : undefined,
+    expenseCategoryId: expenseCategoryIdRaw ? expenseCategoryIdRaw : undefined,
     submissionType: normalizeSubmissionType(searchParams.get("submission_type")),
     status: normalizeStatusFilter(searchParams.get("status")),
     dateTarget: normalizeDateTarget(searchParams.get("date_target")),
@@ -113,6 +111,14 @@ function formatCsvDate(value: string): string {
   }
 
   return parsed.toISOString().slice(0, 10);
+}
+
+function formatCsvNullableDate(value: string | null): string {
+  if (!value) {
+    return "";
+  }
+
+  return formatCsvDate(value);
 }
 
 function escapeCsvValue(value: string | number | null | undefined): string {
@@ -201,16 +207,15 @@ const exportClaimsHandler = async (request: NextRequest, context: AuthenticatedC
       try {
         const header = buildCsvRow([
           "Claim ID",
-          "Employee Name",
           "Employee ID",
+          "Employee Name",
           "Department",
-          "Request Type",
-          "Date",
+          "Type Of Claim",
           "Amount",
           "Status",
-          "Bill No",
-          "Purpose",
-          "Remarks",
+          "Submitted On",
+          "HOD Action Date",
+          "Finance Action Date",
         ]);
 
         controller.enqueue(encoder.encode(`${header}\n`));
@@ -243,16 +248,15 @@ const exportClaimsHandler = async (request: NextRequest, context: AuthenticatedC
             .map((record) =>
               buildCsvRow([
                 record.claimId,
-                record.employeeName,
                 record.employeeId,
-                record.departmentName ?? "",
-                record.paymentModeName,
-                formatCsvDate(record.submittedAt),
+                record.employeeName,
+                record.departmentName,
+                record.typeOfClaim,
                 record.amount.toFixed(2),
                 record.status,
-                record.billNo ?? "",
-                record.purpose ?? "",
-                record.remarks ?? "",
+                formatCsvDate(record.submittedOn),
+                formatCsvNullableDate(record.hodActionDate),
+                formatCsvNullableDate(record.financeActionDate),
               ]),
             )
             .join("\n")}\n`;

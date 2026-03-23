@@ -103,6 +103,10 @@ export type ClaimFinanceEditSnapshot = {
 
 export type GetMyClaimsFilters = {
   paymentModeId?: string;
+  departmentId?: string;
+  locationId?: string;
+  productId?: string;
+  expenseCategoryId?: string;
   detailType?: ClaimDetailType;
   submissionType?: ClaimSubmissionType;
   status?: ClaimStatus | DbClaimStatus[];
@@ -122,14 +126,13 @@ export type ClaimExportRecord = {
   claimId: string;
   employeeName: string;
   employeeId: string;
-  departmentName: string | null;
-  paymentModeName: string;
-  submittedAt: string;
+  departmentName: string;
+  typeOfClaim: string;
   amount: number;
   status: DbClaimStatus;
-  billNo: string | null;
-  purpose: string | null;
-  remarks: string | null;
+  submittedOn: string;
+  hodActionDate: string | null;
+  financeActionDate: string | null;
 };
 
 export type MyClaimRecord = {
@@ -171,12 +174,14 @@ export type CursorPaginatedResult<T> = {
 export type MyClaimListRecord = {
   id: string;
   employeeId: string;
-  submitter: string;
-  departmentName: string | null;
-  paymentModeName: string;
+  employeeName: string;
+  departmentName: string;
+  typeOfClaim: string;
   totalAmount: number;
   status: DbClaimStatus;
   submittedAt: string;
+  hodActionDate: string | null;
+  financeActionDate: string | null;
 };
 
 export type PendingApprovalListRecord = {

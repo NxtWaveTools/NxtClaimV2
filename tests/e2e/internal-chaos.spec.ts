@@ -483,7 +483,7 @@ async function fuzzAndClick(page: Page): Promise<void> {
 }
 
 async function probeFinanceRouteLeak(page: Page, actor: ChaosActor): Promise<string | null> {
-  if (actor.role === "finance") {
+  if (actor.role === "FINANCE") {
     return null;
   }
 

@@ -4,13 +4,14 @@ import type { ClaimDomainLogger, GetMyClaimsFilters } from "@/core/domain/claims
 type MyClaimsPaginatedRecord = {
   id: string;
   employeeId: string;
-  submitter: string;
-  departmentName: string | null;
-  paymentModeName: string;
+  employeeName: string;
+  departmentName: string;
+  typeOfClaim: string;
   totalAmount: number;
   status: DbClaimStatus;
   submittedAt: string;
-  financeApprovedOn: string | null;
+  hodActionDate: string | null;
+  financeActionDate: string | null;
 };
 
 type PaginatedClaimsRepository = {

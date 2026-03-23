@@ -11,12 +11,12 @@ function createLogger() {
 
 function createRepository(overrides?: Partial<DashboardRepository>): DashboardRepository {
   return {
-    getClosedWalletBaseTotals: jest.fn(async () => ({
+    getWalletTotals: jest.fn(async () => ({
       data: {
         totalPettyCashReceived: 1000,
         totalPettyCashSpent: 1200,
         totalReimbursements: 300,
-        totalExpenseSubmitted: 1500,
+        pettyCashBalance: -200,
       },
       errorMessage: null,
     })),
@@ -45,7 +45,7 @@ describe("GetWalletSummaryService", () => {
 
   test("returns error when repository fails", async () => {
     const repository = createRepository({
-      getClosedWalletBaseTotals: jest.fn(async () => ({ data: null, errorMessage: "db failed" })),
+      getWalletTotals: jest.fn(async () => ({ data: null, errorMessage: "db failed" })),
     });
     const logger = createLogger();
     const service = new GetWalletSummaryService({ repository, logger });
@@ -61,12 +61,12 @@ describe("GetWalletSummaryService", () => {
 
   test("preserves paise precision for very small amounts", async () => {
     const repository = createRepository({
-      getClosedWalletBaseTotals: jest.fn(async () => ({
+      getWalletTotals: jest.fn(async () => ({
         data: {
           totalPettyCashReceived: 0.01,
           totalPettyCashSpent: 0,
           totalReimbursements: 0,
-          totalExpenseSubmitted: 0.01,
+          pettyCashBalance: 0.01,
         },
         errorMessage: null,
       })),
@@ -89,12 +89,12 @@ describe("GetWalletSummaryService", () => {
 
   test("handles very large wallet totals without overflow", async () => {
     const repository = createRepository({
-      getClosedWalletBaseTotals: jest.fn(async () => ({
+      getWalletTotals: jest.fn(async () => ({
         data: {
           totalPettyCashReceived: 10000000,
           totalPettyCashSpent: 10000001,
           totalReimbursements: 0.01,
-          totalExpenseSubmitted: 10000002,
+          pettyCashBalance: -1,
         },
         errorMessage: null,
       })),

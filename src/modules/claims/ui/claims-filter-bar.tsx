@@ -7,7 +7,6 @@ import { DB_CLAIM_STATUSES } from "@/core/constants/statuses";
 import { getAccessTokenAction } from "@/modules/auth/actions";
 import type {
   ClaimDateTarget,
-  ClaimDetailType,
   ClaimSearchField,
   ClaimSubmissionType,
 } from "@/core/domain/claims/contracts";
@@ -16,11 +15,6 @@ const SEARCH_FIELD_OPTIONS: Array<{ value: ClaimSearchField; label: string }> = 
   { value: "claim_id", label: "Claim ID" },
   { value: "employee_name", label: "Employee Name" },
   { value: "employee_id", label: "Employee ID" },
-];
-
-const DETAIL_TYPE_OPTIONS: Array<{ value: ClaimDetailType; label: string }> = [
-  { value: "expense", label: "Expense" },
-  { value: "advance", label: "Advance" },
 ];
 
 const SUBMISSION_TYPE_OPTIONS: Array<{ value: ClaimSubmissionType; label: string }> = [
@@ -61,9 +55,12 @@ function hasActiveFilterParams(params: URLSearchParams): boolean {
   }
 
   const trackedFilterKeys = [
-    "detail_type",
     "submission_type",
     "payment_mode_id",
+    "department_id",
+    "location_id",
+    "product_id",
+    "expense_category_id",
     "status",
     "from",
     "to",
@@ -77,6 +74,10 @@ function hasActiveFilterParams(params: URLSearchParams): boolean {
 type ClaimsFilterBarProps = {
   exportScope: "submissions" | "approvals";
   paymentModes: Array<{ id: string; name: string }>;
+  departments: Array<{ id: string; name: string }>;
+  locations: Array<{ id: string; name: string }>;
+  products: Array<{ id: string; name: string }>;
+  expenseCategories: Array<{ id: string; name: string }>;
 };
 
 function extractFilenameFromDisposition(dispositionHeader: string | null): string | null {
@@ -97,7 +98,14 @@ function extractFilenameFromDisposition(dispositionHeader: string | null): strin
   return null;
 }
 
-export function ClaimsFilterBar({ exportScope, paymentModes }: ClaimsFilterBarProps) {
+export function ClaimsFilterBar({
+  exportScope,
+  paymentModes,
+  departments,
+  locations,
+  products,
+  expenseCategories,
+}: ClaimsFilterBarProps) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -248,17 +256,27 @@ export function ClaimsFilterBar({ exportScope, paymentModes }: ClaimsFilterBarPr
   const selectedSearchField = currentParams.get("search_field") ?? "claim_id";
   const selectedDateTarget =
     (currentParams.get("date_target") as ClaimDateTarget | null) ?? "submitted";
-  const selectedDetailType = currentParams.get("detail_type") ?? "";
   const selectedSubmissionType = currentParams.get("submission_type") ?? "";
   const selectedPaymentModeId = currentParams.get("payment_mode_id") ?? "";
+  const selectedDepartmentId = currentParams.get("department_id") ?? "";
+  const selectedLocationId = currentParams.get("location_id") ?? "";
+  const selectedProductId = currentParams.get("product_id") ?? "";
+  const selectedExpenseCategoryId = currentParams.get("expense_category_id") ?? "";
   const selectedStatus = currentParams.get("status") ?? "";
   const selectedFromDate = currentParams.get("from") ?? "";
   const selectedToDate = currentParams.get("to") ?? "";
   const hasActiveFilters = hasActiveFilterParams(currentParams);
 
+  const searchPlaceholder =
+    selectedSearchField === "claim_id"
+      ? "Search by Claim ID..."
+      : selectedSearchField === "employee_name"
+        ? "Search by Employee Name..."
+        : "Search by Employee ID...";
+
   return (
     <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition-colors dark:border-slate-800 dark:bg-zinc-950">
-      <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-4">
         <div className="inline-flex rounded-xl border border-slate-200 bg-slate-50 p-1 dark:border-slate-700 dark:bg-slate-900/60">
           {DATE_TARGET_OPTIONS.map((option) => (
             <button
@@ -348,10 +366,10 @@ export function ClaimsFilterBar({ exportScope, paymentModes }: ClaimsFilterBarPr
       <div
         id="claims-filter-panel"
         className={`overflow-hidden transition-all duration-300 ${
-          isFiltersExpanded ? "mt-4 max-h-[1000px] opacity-100" : "max-h-0 opacity-0"
+          isFiltersExpanded ? "mt-6 max-h-[1200px] opacity-100" : "max-h-0 opacity-0"
         }`}
       >
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <div className="grid gap-5 md:grid-cols-3 xl:grid-cols-3">
           <label className="grid gap-1 text-sm text-slate-700 dark:text-slate-300">
             Search Category
             <select
@@ -376,27 +394,9 @@ export function ClaimsFilterBar({ exportScope, paymentModes }: ClaimsFilterBarPr
               onChange={(event) => {
                 setSearchInput(event.target.value);
               }}
-              placeholder="Search claims"
+              placeholder={searchPlaceholder}
               className="rounded-lg border border-slate-300 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
             />
-          </label>
-
-          <label className="grid gap-1 text-sm text-slate-700 dark:text-slate-300">
-            Detail Type
-            <select
-              value={selectedDetailType}
-              onChange={(event) => {
-                setParam("detail_type", event.target.value);
-              }}
-              className="rounded-lg border border-slate-300 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
-            >
-              <option value="">All</option>
-              {DETAIL_TYPE_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
           </label>
 
           <label className="grid gap-1 text-sm text-slate-700 dark:text-slate-300">
@@ -430,6 +430,78 @@ export function ClaimsFilterBar({ exportScope, paymentModes }: ClaimsFilterBarPr
               {paymentModes.map((mode) => (
                 <option key={mode.id} value={mode.id}>
                   {mode.name}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="grid gap-1 text-sm text-slate-700 dark:text-slate-300">
+            Department
+            <select
+              value={selectedDepartmentId}
+              onChange={(event) => {
+                setParam("department_id", event.target.value);
+              }}
+              className="rounded-lg border border-slate-300 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+            >
+              <option value="">All</option>
+              {departments.map((department) => (
+                <option key={department.id} value={department.id}>
+                  {department.name}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="grid gap-1 text-sm text-slate-700 dark:text-slate-300">
+            Location
+            <select
+              value={selectedLocationId}
+              onChange={(event) => {
+                setParam("location_id", event.target.value);
+              }}
+              className="rounded-lg border border-slate-300 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+            >
+              <option value="">All</option>
+              {locations.map((location) => (
+                <option key={location.id} value={location.id}>
+                  {location.name}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="grid gap-1 text-sm text-slate-700 dark:text-slate-300">
+            Product
+            <select
+              value={selectedProductId}
+              onChange={(event) => {
+                setParam("product_id", event.target.value);
+              }}
+              className="rounded-lg border border-slate-300 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+            >
+              <option value="">All</option>
+              {products.map((product) => (
+                <option key={product.id} value={product.id}>
+                  {product.name}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="grid gap-1 text-sm text-slate-700 dark:text-slate-300">
+            Expense Category
+            <select
+              value={selectedExpenseCategoryId}
+              onChange={(event) => {
+                setParam("expense_category_id", event.target.value);
+              }}
+              className="rounded-lg border border-slate-300 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+            >
+              <option value="">All</option>
+              {expenseCategories.map((category) => (
+                <option key={category.id} value={category.id}>
+                  {category.name}
                 </option>
               ))}
             </select>

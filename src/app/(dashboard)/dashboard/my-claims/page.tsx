@@ -6,7 +6,6 @@ import { ROUTES } from "@/core/config/route-registry";
 import { DB_CLAIM_STATUSES, type DbClaimStatus } from "@/core/constants/statuses";
 import type {
   ClaimDateTarget,
-  ClaimDetailType,
   ClaimSearchField,
   ClaimSubmissionType,
   GetMyClaimsFilters,
@@ -69,14 +68,6 @@ function resolveView(value: string | undefined, canViewApprovals: boolean): View
   return "submissions";
 }
 
-function normalizeDetailType(value: string | undefined): ClaimDetailType | undefined {
-  if (value === "expense" || value === "advance") {
-    return value;
-  }
-
-  return undefined;
-}
-
 function normalizeSubmissionType(value: string | undefined): ClaimSubmissionType | undefined {
   if (value === "Self" || value === "On Behalf") {
     return value;
@@ -119,6 +110,16 @@ function normalizePaymentModeId(value: string | undefined): string | undefined {
   return trimmed ? trimmed : undefined;
 }
 
+function normalizeDepartmentId(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : undefined;
+}
+
+function normalizeLookupId(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : undefined;
+}
+
 function normalizeStatusFilter(value: string | undefined): DbClaimStatus[] | undefined {
   if (!value) {
     return undefined;
@@ -137,7 +138,6 @@ function normalizeStatusFilter(value: string | undefined): DbClaimStatus[] | und
 }
 
 function buildClaimFilters(searchParams?: Record<string, SearchParamsValue>): GetMyClaimsFilters {
-  const detailType = normalizeDetailType(firstParamValue(searchParams?.detail_type));
   const submissionType = normalizeSubmissionType(firstParamValue(searchParams?.submission_type));
   const status = normalizeStatusFilter(firstParamValue(searchParams?.status));
   const dateTarget = normalizeDateTarget(firstParamValue(searchParams?.date_target));
@@ -145,12 +145,19 @@ function buildClaimFilters(searchParams?: Record<string, SearchParamsValue>): Ge
   const dateTo = normalizeDate(firstParamValue(searchParams?.to));
   const searchField = normalizeSearchField(firstParamValue(searchParams?.search_field));
   const paymentModeId = normalizePaymentModeId(firstParamValue(searchParams?.payment_mode_id));
+  const departmentId = normalizeDepartmentId(firstParamValue(searchParams?.department_id));
+  const locationId = normalizeLookupId(firstParamValue(searchParams?.location_id));
+  const productId = normalizeLookupId(firstParamValue(searchParams?.product_id));
+  const expenseCategoryId = normalizeLookupId(firstParamValue(searchParams?.expense_category_id));
   const rawSearchQuery = firstParamValue(searchParams?.search_query)?.trim();
   const searchQuery = rawSearchQuery ? rawSearchQuery : undefined;
 
   return {
     paymentModeId,
-    detailType,
+    departmentId,
+    locationId,
+    productId,
+    expenseCategoryId,
     submissionType,
     status,
     dateTarget,
@@ -318,13 +325,16 @@ function TableHeader({ showActions }: { showActions: boolean }) {
   return (
     <thead className="bg-slate-50 text-xs uppercase tracking-[0.12em] text-slate-600 dark:bg-slate-900/50 dark:text-slate-400">
       <tr>
-        <th className="whitespace-nowrap px-4 py-3 font-semibold">Claim ID</th>
-        <th className="whitespace-nowrap px-4 py-3 font-semibold">Employee</th>
-        <th className="whitespace-nowrap px-4 py-3 font-semibold">Dept</th>
-        <th className="whitespace-nowrap px-4 py-3 font-semibold">Request Type</th>
-        <th className="whitespace-nowrap px-4 py-3 font-semibold">Amount</th>
-        <th className="whitespace-nowrap px-4 py-3 font-semibold">Status</th>
-        <th className="whitespace-nowrap px-4 py-3 font-semibold">Submitted On</th>
+        <th className="whitespace-nowrap px-4 py-3 font-semibold">CLAIM ID</th>
+        <th className="whitespace-nowrap px-4 py-3 font-semibold">EMPLOYEE ID</th>
+        <th className="whitespace-nowrap px-4 py-3 font-semibold">EMPLOYEE NAME</th>
+        <th className="whitespace-nowrap px-4 py-3 font-semibold">DEPARTMENT</th>
+        <th className="whitespace-nowrap px-4 py-3 font-semibold">TYPE OF CLAIM</th>
+        <th className="whitespace-nowrap px-4 py-3 font-semibold">AMOUNT</th>
+        <th className="whitespace-nowrap px-4 py-3 font-semibold">STATUS</th>
+        <th className="whitespace-nowrap px-4 py-3 font-semibold">SUBMITTED ON</th>
+        <th className="whitespace-nowrap px-4 py-3 font-semibold">HOD ACTION DATE</th>
+        <th className="whitespace-nowrap px-4 py-3 font-semibold">FINANCE ACTION DATE</th>
         {showActions ? (
           <th className="whitespace-nowrap px-4 py-3 text-right font-semibold">Actions</th>
         ) : null}
@@ -398,7 +408,7 @@ async function ClaimsCommandCenterTable({
         ) : (
           <>
             <div className="w-full overflow-x-auto">
-              <table className="min-w-[1200px] divide-y divide-slate-200 text-left text-sm dark:divide-slate-800">
+              <table className="min-w-[1720px] divide-y divide-slate-200 text-left text-sm dark:divide-slate-800">
                 <TableHeader showActions />
                 <tbody className="divide-y divide-slate-100 bg-white text-slate-700 dark:divide-slate-900 dark:bg-zinc-950 dark:text-slate-300">
                   {rows.map((claim) => {
@@ -510,11 +520,26 @@ async function ClaimsCommandCenterTable({
                             {claim.id}
                           </Link>
                         </td>
-                        <td className="whitespace-nowrap px-4 py-3">{claim.submitter}</td>
                         <td className="whitespace-nowrap px-4 py-3">
-                          {claim.departmentName ?? "Unknown Department"}
+                          <span className="inline-block max-w-[180px] truncate align-bottom">
+                            {claim.employeeId}
+                          </span>
                         </td>
-                        <td className="whitespace-nowrap px-4 py-3">{claim.paymentModeName}</td>
+                        <td className="px-4 py-3">
+                          <span className="inline-block max-w-[220px] truncate align-bottom">
+                            {claim.submitter}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className="inline-block max-w-[200px] truncate align-bottom">
+                            {claim.departmentName ?? "Unknown Department"}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className="inline-block max-w-[220px] truncate align-bottom">
+                            {claim.paymentModeName}
+                          </span>
+                        </td>
                         <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-900 dark:text-slate-100">
                           {formatAmount(claim.totalAmount)}
                         </td>
@@ -524,6 +549,8 @@ async function ClaimsCommandCenterTable({
                         <td className="whitespace-nowrap px-4 py-3">
                           {formatDate(claim.submittedAt)}
                         </td>
+                        <td className="whitespace-nowrap px-4 py-3">N/A</td>
+                        <td className="whitespace-nowrap px-4 py-3">N/A</td>
                         <td className="whitespace-nowrap px-4 py-3 text-right">
                           <div className="flex min-w-[360px] flex-wrap items-start justify-end gap-2">
                             {claim.detailType === "expense" &&
@@ -632,7 +659,7 @@ async function ClaimsCommandCenterTable({
       ) : (
         <>
           <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-slate-200 text-left text-sm dark:divide-slate-800">
+            <table className="min-w-[1500px] divide-y divide-slate-200 text-left text-sm dark:divide-slate-800">
               <TableHeader showActions={false} />
               <tbody className="divide-y divide-slate-100 bg-white text-slate-700 dark:divide-slate-900 dark:bg-zinc-950 dark:text-slate-300">
                 {rows.map((claim) => (
@@ -648,9 +675,26 @@ async function ClaimsCommandCenterTable({
                         {claim.id}
                       </Link>
                     </td>
-                    <td className="px-4 py-3">{claim.submitter}</td>
-                    <td className="px-4 py-3">{claim.departmentName ?? "Unknown Department"}</td>
-                    <td className="px-4 py-3">{claim.paymentModeName}</td>
+                    <td className="px-4 py-3">
+                      <span className="inline-block max-w-[180px] truncate align-bottom">
+                        {claim.employeeId}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className="inline-block max-w-[220px] truncate align-bottom">
+                        {claim.employeeName}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className="inline-block max-w-[200px] truncate align-bottom">
+                        {claim.departmentName}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className="inline-block max-w-[220px] truncate align-bottom">
+                        {claim.typeOfClaim}
+                      </span>
+                    </td>
                     <td className="px-4 py-3 font-semibold text-slate-900 dark:text-slate-100">
                       {formatAmount(claim.totalAmount)}
                     </td>
@@ -658,6 +702,8 @@ async function ClaimsCommandCenterTable({
                       <ClaimStatusBadge status={claim.status} />
                     </td>
                     <td className="px-4 py-3">{formatDate(claim.submittedAt)}</td>
+                    <td className="px-4 py-3">{formatDate(claim.hodActionDate)}</td>
+                    <td className="px-4 py-3">{formatDate(claim.financeActionDate)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -722,8 +768,29 @@ export default async function MyClaimsDashboardPage({
   const canViewApprovals = viewerContextResult.canViewApprovals;
   const activeView = resolveView(firstParamValue(resolvedSearchParams?.view), canViewApprovals);
 
-  const paymentModesResult = await claimRepository.getActivePaymentModes();
+  const [paymentModesResult, departmentsResult, locationsResult, productsResult, categoriesResult] =
+    await Promise.all([
+      claimRepository.getActivePaymentModes(),
+      claimRepository.getActiveDepartments(),
+      claimRepository.getActiveLocations(),
+      claimRepository.getActiveProducts(),
+      claimRepository.getActiveExpenseCategories(),
+    ]);
+
   const paymentModes = paymentModesResult.data.map((mode) => ({ id: mode.id, name: mode.name }));
+  const departments = departmentsResult.data.map((department) => ({
+    id: department.id,
+    name: department.name,
+  }));
+  const locations = locationsResult.data.map((location) => ({
+    id: location.id,
+    name: location.name,
+  }));
+  const products = productsResult.data.map((product) => ({ id: product.id, name: product.name }));
+  const expenseCategories = categoriesResult.data.map((category) => ({
+    id: category.id,
+    name: category.name,
+  }));
 
   const submissionsHref = buildViewHref(resolvedSearchParams, "submissions");
   const approvalsHref = buildViewHref(resolvedSearchParams, "approvals");
@@ -782,7 +849,14 @@ export default async function MyClaimsDashboardPage({
           ) : null}
         </section>
 
-        <ClaimsFilterBar exportScope={activeView} paymentModes={paymentModes} />
+        <ClaimsFilterBar
+          exportScope={activeView}
+          paymentModes={paymentModes}
+          departments={departments}
+          locations={locations}
+          products={products}
+          expenseCategories={expenseCategories}
+        />
 
         <Suspense fallback={<ClaimsTableSkeleton />}>
           <ClaimsCommandCenterTable

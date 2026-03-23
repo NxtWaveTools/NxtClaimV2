@@ -63,21 +63,29 @@ type GetMyClaimsRow = {
   advance_details: ClaimAdvanceDetailRow | ClaimAdvanceDetailRow[] | null;
 };
 
-type GetMyClaimsPaginatedRow = {
-  id: string;
+type EnterpriseClaimsDashboardRow = {
+  claim_id: string;
+  employee_name: string;
   employee_id: string;
+  department_name: string;
+  type_of_claim: string;
+  amount: number | string;
+  status: DbClaimStatus;
+  submitted_on: string;
+  hod_action_date: string | null;
+  finance_action_date: string | null;
+  submitted_by: string;
+  on_behalf_of_id: string | null;
+  assigned_l1_approver_id: string;
+  assigned_l2_approver_id: string | null;
+  department_id: string;
+  payment_mode_id: string;
+  location_id: string | null;
+  product_id: string | null;
+  expense_category_id: string | null;
   detail_type: "expense" | "advance";
   submission_type: "Self" | "On Behalf";
-  submitted_by: string;
-  status: DbClaimStatus;
-  submitted_at: string;
   created_at: string;
-  updated_at: string;
-  submitter_user: ClaimSubmitterRow | ClaimSubmitterRow[] | null;
-  master_departments: ClaimRelationNameRow | ClaimRelationNameRow[] | null;
-  master_payment_modes: ClaimRelationNameRow | ClaimRelationNameRow[] | null;
-  expense_details: ClaimExpenseDetailRow | ClaimExpenseDetailRow[] | null;
-  advance_details: ClaimAdvanceDetailRow | ClaimAdvanceDetailRow[] | null;
 };
 
 type DepartmentApproverRoleRow = {
@@ -101,33 +109,6 @@ type GetPendingApprovalsRow = {
   master_payment_modes: ClaimRelationNameRow | ClaimRelationNameRow[] | null;
   expense_details: ClaimExpenseDetailRow | ClaimExpenseDetailRow[] | null;
   advance_details: ClaimAdvanceDetailRow | ClaimAdvanceDetailRow[] | null;
-};
-
-type ClaimExportExpenseDetailRow = {
-  bill_no: string | null;
-  purpose: string | null;
-  remarks: string | null;
-  total_amount: number | string | null;
-};
-
-type ClaimExportAdvanceDetailRow = {
-  purpose: string | null;
-  remarks: string | null;
-  requested_amount: number | string | null;
-};
-
-type GetClaimsForExportRow = {
-  id: string;
-  employee_id: string;
-  status: DbClaimStatus;
-  submitted_at: string;
-  created_at: string;
-  updated_at: string;
-  submitter_user: ClaimSubmitterRow | ClaimSubmitterRow[] | null;
-  master_departments: ClaimRelationNameRow | ClaimRelationNameRow[] | null;
-  master_payment_modes: ClaimRelationNameRow | ClaimRelationNameRow[] | null;
-  expense_details: ClaimExportExpenseDetailRow | ClaimExportExpenseDetailRow[] | null;
-  advance_details: ClaimExportAdvanceDetailRow | ClaimExportAdvanceDetailRow[] | null;
 };
 
 type ClaimL1DecisionRow = {
@@ -321,6 +302,88 @@ function normalizeSearchInput(filters?: GetMyClaimsFilters): {
   };
 }
 
+type EnterpriseDashboardQueryChain<TQuery> = {
+  eq(column: string, value: string): TQuery;
+  in(column: string, values: DbClaimStatus[]): TQuery;
+  not(column: string, operator: string, value: null): TQuery;
+  gte(column: string, value: string): TQuery;
+  lte(column: string, value: string): TQuery;
+  ilike(column: string, pattern: string): TQuery;
+};
+
+function applyEnterpriseDashboardFilters<
+  TQuery extends EnterpriseDashboardQueryChain<TQuery>,
+>(params: {
+  query: TQuery;
+  filters?: GetMyClaimsFilters;
+  normalizedStatuses: DbClaimStatus[];
+  fromDate?: string;
+  toDate?: string;
+  normalizedSearch: { field: GetMyClaimsFilters["searchField"]; query: string };
+}): TQuery {
+  let { query } = params;
+
+  if (params.filters?.paymentModeId) {
+    query = query.eq("payment_mode_id", params.filters.paymentModeId);
+  }
+
+  if (params.filters?.departmentId) {
+    query = query.eq("department_id", params.filters.departmentId);
+  }
+
+  if (params.filters?.locationId) {
+    query = query.eq("location_id", params.filters.locationId);
+  }
+
+  if (params.filters?.productId) {
+    query = query.eq("product_id", params.filters.productId);
+  }
+
+  if (params.filters?.expenseCategoryId) {
+    query = query.eq("expense_category_id", params.filters.expenseCategoryId);
+  }
+
+  if (params.filters?.submissionType) {
+    query = query.eq("submission_type", params.filters.submissionType);
+  }
+
+  if (params.normalizedStatuses.length > 0) {
+    query = query.in("status", params.normalizedStatuses);
+  }
+
+  if (params.filters?.dateTarget === "finance_closed") {
+    query = query.not("finance_action_date", "is", null);
+  }
+
+  if (params.fromDate) {
+    const column =
+      params.filters?.dateTarget === "finance_closed" ? "finance_action_date" : "submitted_on";
+    query = query.gte(column, `${params.fromDate}T00:00:00.000Z`);
+  }
+
+  if (params.toDate) {
+    const column =
+      params.filters?.dateTarget === "finance_closed" ? "finance_action_date" : "submitted_on";
+    query = query.lte(column, `${params.toDate}T23:59:59.999Z`);
+  }
+
+  if (params.normalizedSearch.query && params.normalizedSearch.field) {
+    if (params.normalizedSearch.field === "claim_id") {
+      query = query.eq("claim_id", params.normalizedSearch.query);
+    }
+
+    if (params.normalizedSearch.field === "employee_name") {
+      query = query.ilike("employee_name", `%${params.normalizedSearch.query}%`);
+    }
+
+    if (params.normalizedSearch.field === "employee_id") {
+      query = query.ilike("employee_id", `%${params.normalizedSearch.query}%`);
+    }
+  }
+
+  return query;
+}
+
 function mapPendingApprovalRows(rows: GetPendingApprovalsRow[]) {
   return rows.map((row) => {
     const department = getSingleRelation(row.master_departments);
@@ -408,9 +471,9 @@ function buildMyClaimsOwnershipOrFilter(userId: string): string {
 function buildMyClaimsOwnershipWithCursorOrFilter(userId: string, cursor: ClaimsCursor): string {
   return [
     `and(submitted_by.eq.${userId},created_at.lt.${cursor.createdAt})`,
-    `and(submitted_by.eq.${userId},created_at.eq.${cursor.createdAt},id.lt.${cursor.id})`,
+    `and(submitted_by.eq.${userId},created_at.eq.${cursor.createdAt},claim_id.lt.${cursor.id})`,
     `and(on_behalf_of_id.eq.${userId},created_at.lt.${cursor.createdAt})`,
-    `and(on_behalf_of_id.eq.${userId},created_at.eq.${cursor.createdAt},id.lt.${cursor.id})`,
+    `and(on_behalf_of_id.eq.${userId},created_at.eq.${cursor.createdAt},claim_id.lt.${cursor.id})`,
   ].join(",");
 }
 
@@ -628,12 +691,17 @@ export class SupabaseClaimRepository implements ClaimRepository {
     rejectionReason: string | null;
   }): Promise<{ errorMessage: string | null }> {
     const client = getServiceRoleSupabaseClient();
+    const isL1TerminalStatus =
+      input.status === DB_CLAIM_STATUSES[1] ||
+      (input.status === "Rejected" && input.assignedL2ApproverId === null);
+
     const { error } = await client
       .from("claims")
       .update({
         status: input.status,
         assigned_l2_approver_id: input.assignedL2ApproverId,
         rejection_reason: input.rejectionReason,
+        hod_action_at: isL1TerminalStatus ? new Date().toISOString() : null,
       })
       .eq("id", input.claimId)
       .eq("is_active", true);
@@ -684,12 +752,18 @@ export class SupabaseClaimRepository implements ClaimRepository {
     rejectionReason: string | null;
   }): Promise<{ errorMessage: string | null }> {
     const client = getServiceRoleSupabaseClient();
+    const isFinanceTerminalStatus =
+      input.status === DB_CLAIM_STATUSES[2] ||
+      input.status === DB_CLAIM_STATUSES[3] ||
+      (input.status === "Rejected" && input.assignedL2ApproverId !== null);
+
     const { error } = await client
       .from("claims")
       .update({
         status: input.status,
         assigned_l2_approver_id: input.assignedL2ApproverId,
         rejection_reason: input.rejectionReason,
+        finance_action_at: isFinanceTerminalStatus ? new Date().toISOString() : null,
       })
       .eq("id", input.claimId)
       .eq("is_active", true);
@@ -1251,6 +1325,10 @@ export class SupabaseClaimRepository implements ClaimRepository {
       query = query.eq("payment_mode_id", filters.paymentModeId);
     }
 
+    if (filters?.departmentId) {
+      query = query.eq("department_id", filters.departmentId);
+    }
+
     if (filters?.submissionType) {
       query = query.eq("submission_type", filters.submissionType);
     }
@@ -1325,13 +1403,14 @@ export class SupabaseClaimRepository implements ClaimRepository {
     data: Array<{
       id: string;
       employeeId: string;
-      submitter: string;
-      departmentName: string | null;
-      paymentModeName: string;
+      employeeName: string;
+      departmentName: string;
+      typeOfClaim: string;
       totalAmount: number;
       status: DbClaimStatus;
       submittedAt: string;
-      financeApprovedOn: string | null;
+      hodActionDate: string | null;
+      financeActionDate: string | null;
     }>;
     nextCursor: string | null;
     hasNextPage: boolean;
@@ -1341,7 +1420,6 @@ export class SupabaseClaimRepository implements ClaimRepository {
     const decodedCursor = decodeClaimsCursor(cursor);
     const normalizedStatuses = normalizeStatusFilter(filters?.status);
     const { fromDate, toDate } = normalizeDateRange(filters);
-    const dateColumn = filters?.dateTarget === "finance_closed" ? "updated_at" : "submitted_at";
     const normalizedSearch = normalizeSearchInput(filters);
 
     if (cursor && !decodedCursor) {
@@ -1354,60 +1432,26 @@ export class SupabaseClaimRepository implements ClaimRepository {
     }
 
     let query = client
-      .from("claims")
+      .from("vw_enterprise_claims_dashboard")
       .select(
-        "id, employee_id, detail_type, submission_type, submitted_by, status, submitted_at, created_at, updated_at, submitter_user:users!claims_submitted_by_fkey!inner(full_name, email), master_departments(name), master_payment_modes(name), expense_details(total_amount), advance_details(requested_amount)",
+        "claim_id, employee_name, employee_id, department_name, type_of_claim, amount, status, submitted_on, hod_action_date, finance_action_date, submitted_by, on_behalf_of_id, department_id, payment_mode_id, detail_type, submission_type, created_at",
       )
       .or(
         decodedCursor
           ? buildMyClaimsOwnershipWithCursorOrFilter(userId, decodedCursor)
           : buildMyClaimsOwnershipOrFilter(userId),
       )
-      .eq("is_active", true)
       .order("created_at", { ascending: false })
-      .order("id", { ascending: false });
+      .order("claim_id", { ascending: false });
 
-    if (filters?.detailType) {
-      query = query.eq("detail_type", filters.detailType);
-    }
-
-    if (filters?.paymentModeId) {
-      query = query.eq("payment_mode_id", filters.paymentModeId);
-    }
-
-    if (filters?.submissionType) {
-      query = query.eq("submission_type", filters.submissionType);
-    }
-
-    if (normalizedStatuses.length > 0) {
-      query = query.in("status", normalizedStatuses);
-    }
-
-    if (filters?.dateTarget === "finance_closed") {
-      query = query.in("status", FINANCE_CLOSED_STATUSES);
-    }
-
-    if (fromDate) {
-      query = query.gte(dateColumn, `${fromDate}T00:00:00.000Z`);
-    }
-
-    if (toDate) {
-      query = query.lte(dateColumn, `${toDate}T23:59:59.999Z`);
-    }
-
-    if (normalizedSearch.query && normalizedSearch.field) {
-      if (normalizedSearch.field === "claim_id") {
-        query = query.eq("id", normalizedSearch.query);
-      }
-
-      if (normalizedSearch.field === "employee_name") {
-        query = query.ilike("submitter_user.full_name", `%${normalizedSearch.query}%`);
-      }
-
-      if (normalizedSearch.field === "employee_id") {
-        query = query.ilike("employee_id", `%${normalizedSearch.query}%`);
-      }
-    }
+    query = applyEnterpriseDashboardFilters({
+      query,
+      filters,
+      normalizedStatuses,
+      fromDate,
+      toDate,
+      normalizedSearch,
+    });
 
     const { data, error } = await query.limit(limit + 1);
 
@@ -1420,40 +1464,27 @@ export class SupabaseClaimRepository implements ClaimRepository {
       };
     }
 
-    const rows = (data ?? []) as GetMyClaimsPaginatedRow[];
+    const rows = (data ?? []) as EnterpriseClaimsDashboardRow[];
     const hasExtraRecord = rows.length > limit;
     const pageRows = hasExtraRecord ? rows.slice(0, limit) : rows;
     const lastRow = pageRows[pageRows.length - 1] ?? null;
     const nextCursor =
       hasExtraRecord && lastRow
-        ? encodeClaimsCursor({ createdAt: lastRow.created_at, id: lastRow.id })
+        ? encodeClaimsCursor({ createdAt: lastRow.created_at, id: lastRow.claim_id })
         : null;
 
-    const mappedRows = pageRows.map((row) => {
-      const department = getSingleRelation(row.master_departments);
-      const paymentMode = getSingleRelation(row.master_payment_modes);
-      const expense = getSingleRelation(row.expense_details);
-      const advance = getSingleRelation(row.advance_details);
-      const submitter = getSingleRelation(row.submitter_user);
-      const submitterName = submitter?.full_name?.trim();
-      const submitterEmail = submitter?.email?.trim();
-      const submitterLabel =
-        submitterName && submitterEmail
-          ? `${submitterName} (${submitterEmail})`
-          : (submitterName ?? submitterEmail ?? row.employee_id);
-
-      return {
-        id: row.id,
-        employeeId: row.employee_id,
-        submitter: submitterLabel,
-        departmentName: department?.name ?? null,
-        paymentModeName: paymentMode?.name ?? "Unknown Payment Mode",
-        totalAmount: toNumber(expense?.total_amount) ?? toNumber(advance?.requested_amount) ?? 0,
-        status: row.status,
-        submittedAt: row.submitted_at,
-        financeApprovedOn: FINANCE_CLOSED_STATUSES.includes(row.status) ? row.updated_at : null,
-      };
-    });
+    const mappedRows = pageRows.map((row) => ({
+      id: row.claim_id,
+      employeeId: row.employee_id,
+      employeeName: row.employee_name,
+      departmentName: row.department_name,
+      typeOfClaim: row.type_of_claim,
+      totalAmount: toNumber(row.amount) ?? 0,
+      status: row.status,
+      submittedAt: row.submitted_on,
+      hodActionDate: row.hod_action_date,
+      financeActionDate: row.finance_action_date,
+    }));
 
     return {
       data: mappedRows,
@@ -1768,8 +1799,6 @@ export class SupabaseClaimRepository implements ClaimRepository {
     const client = getServiceRoleSupabaseClient();
     const normalizedStatuses = normalizeStatusFilter(input.filters?.status);
     const { fromDate, toDate } = normalizeDateRange(input.filters);
-    const dateColumn =
-      input.filters?.dateTarget === "finance_closed" ? "updated_at" : "submitted_at";
     const normalizedSearch = normalizeSearchInput(input.filters);
 
     let financeApproverIds: string[] = [];
@@ -1797,16 +1826,15 @@ export class SupabaseClaimRepository implements ClaimRepository {
     }
 
     let query = client
-      .from("claims")
+      .from("vw_enterprise_claims_dashboard")
       .select(
-        "id, employee_id, detail_type, submission_type, status, submitted_at, created_at, updated_at, submitter_user:users!claims_submitted_by_fkey!inner(full_name, email), master_departments(name), master_payment_modes(name), expense_details(bill_no, purpose, remarks, total_amount), advance_details(purpose, remarks, requested_amount)",
+        "claim_id, employee_name, employee_id, department_name, type_of_claim, amount, status, submitted_on, hod_action_date, finance_action_date, submitted_by, on_behalf_of_id, assigned_l1_approver_id, assigned_l2_approver_id, department_id, payment_mode_id, detail_type, submission_type, created_at",
       )
-      .eq("is_active", true)
       .order("created_at", { ascending: false })
-      .order("id", { ascending: false });
+      .order("claim_id", { ascending: false });
 
     if (input.fetchScope === "submissions") {
-      query = query.eq("submitted_by", input.userId);
+      query = query.or(buildMyClaimsOwnershipOrFilter(input.userId));
     }
 
     if (input.fetchScope === "l1_approvals") {
@@ -1823,47 +1851,14 @@ export class SupabaseClaimRepository implements ClaimRepository {
       );
     }
 
-    if (input.filters?.detailType) {
-      query = query.eq("detail_type", input.filters.detailType);
-    }
-
-    if (input.filters?.paymentModeId) {
-      query = query.eq("payment_mode_id", input.filters.paymentModeId);
-    }
-
-    if (input.filters?.submissionType) {
-      query = query.eq("submission_type", input.filters.submissionType);
-    }
-
-    if (normalizedStatuses.length > 0) {
-      query = query.in("status", normalizedStatuses);
-    }
-
-    if (input.filters?.dateTarget === "finance_closed") {
-      query = query.in("status", FINANCE_CLOSED_STATUSES);
-    }
-
-    if (fromDate) {
-      query = query.gte(dateColumn, `${fromDate}T00:00:00.000Z`);
-    }
-
-    if (toDate) {
-      query = query.lte(dateColumn, `${toDate}T23:59:59.999Z`);
-    }
-
-    if (normalizedSearch.query && normalizedSearch.field) {
-      if (normalizedSearch.field === "claim_id") {
-        query = query.eq("id", normalizedSearch.query);
-      }
-
-      if (normalizedSearch.field === "employee_name") {
-        query = query.ilike("submitter_user.full_name", `%${normalizedSearch.query}%`);
-      }
-
-      if (normalizedSearch.field === "employee_id") {
-        query = query.ilike("employee_id", `%${normalizedSearch.query}%`);
-      }
-    }
+    query = applyEnterpriseDashboardFilters({
+      query,
+      filters: input.filters,
+      normalizedStatuses,
+      fromDate,
+      toDate,
+      normalizedSearch,
+    });
 
     const { data, error } = await query.range(input.offset, input.offset + input.limit - 1);
 
@@ -1874,32 +1869,21 @@ export class SupabaseClaimRepository implements ClaimRepository {
       };
     }
 
-    const rows = (data ?? []) as GetClaimsForExportRow[];
+    const rows = (data ?? []) as EnterpriseClaimsDashboardRow[];
 
     return {
-      data: rows.map((row) => {
-        const department = getSingleRelation(row.master_departments);
-        const paymentMode = getSingleRelation(row.master_payment_modes);
-        const expense = getSingleRelation(row.expense_details);
-        const advance = getSingleRelation(row.advance_details);
-        const submitter = getSingleRelation(row.submitter_user);
-        const submitterName = submitter?.full_name?.trim();
-        const submitterEmail = submitter?.email?.trim();
-
-        return {
-          claimId: row.id,
-          employeeName: submitterName ?? submitterEmail ?? row.employee_id,
-          employeeId: row.employee_id,
-          departmentName: department?.name ?? null,
-          paymentModeName: paymentMode?.name ?? "Unknown Payment Mode",
-          submittedAt: row.submitted_at,
-          amount: toNumber(expense?.total_amount) ?? toNumber(advance?.requested_amount) ?? 0,
-          status: row.status,
-          billNo: expense?.bill_no ?? null,
-          purpose: expense?.purpose ?? advance?.purpose ?? null,
-          remarks: expense?.remarks ?? advance?.remarks ?? null,
-        };
-      }),
+      data: rows.map((row) => ({
+        claimId: row.claim_id,
+        employeeName: row.employee_name,
+        employeeId: row.employee_id,
+        departmentName: row.department_name,
+        typeOfClaim: row.type_of_claim,
+        amount: toNumber(row.amount) ?? 0,
+        status: row.status,
+        submittedOn: row.submitted_on,
+        hodActionDate: row.hod_action_date,
+        financeActionDate: row.finance_action_date,
+      })),
       errorMessage: null,
     };
   }

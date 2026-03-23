@@ -3,7 +3,6 @@
 import { AuthService } from "@/core/domain/auth/auth.service";
 import { AUTH_PROVIDERS } from "@/core/constants/auth";
 import { logger } from "@/core/infra/logging/logger";
-import { ROUTES } from "@/core/config/route-registry";
 import { SupabaseAuthRepository } from "@/modules/auth/repositories/supabase-auth.repository";
 import type { LoginFormValues } from "@/modules/auth/validators/login-schema";
 

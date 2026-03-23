@@ -163,7 +163,7 @@ export default async function MyClaimsPage({
           </div>
         </section>
 
-        <section className="grid gap-4 md:grid-cols-3">
+        <section className="grid gap-5 md:grid-cols-3">
           <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition-colors dark:border-slate-800 dark:bg-zinc-950">
             <p className="text-xs uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">
               Total Claims

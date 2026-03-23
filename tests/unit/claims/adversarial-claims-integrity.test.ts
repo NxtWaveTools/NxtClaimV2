@@ -42,7 +42,6 @@ const baseExpenseInput = {
     igstAmount: 0,
     transactionDate: "2026-03-14",
     basicAmount: 100,
-    totalAmount: 118,
     currencyCode: "INR",
     vendorName: null,
     receiptFilePath: "expenses/11111111-1111-1111-1111-111111111111/adv_bill.pdf",
@@ -130,7 +129,6 @@ describe("Adversarial Service Integrity", () => {
       expense: {
         ...baseExpenseInput.expense,
         basicAmount: -100,
-        totalAmount: -82,
       },
     });
 
@@ -150,7 +148,6 @@ describe("Adversarial Service Integrity", () => {
         cgstAmount: 9,
         sgstAmount: 9,
         igstAmount: 0,
-        totalAmount: 999,
       },
     });
 
@@ -161,12 +158,12 @@ describe("Adversarial Service Integrity", () => {
 
   test("GetWalletSummaryService must reject negative ledger inputs", async () => {
     const repository: DashboardRepository = {
-      getClosedWalletBaseTotals: jest.fn(async () => ({
+      getWalletTotals: jest.fn(async () => ({
         data: {
           totalPettyCashReceived: -100,
           totalPettyCashSpent: 50,
           totalReimbursements: 20,
-          totalExpenseSubmitted: 50,
+          pettyCashBalance: -130,
         },
         errorMessage: null,
       })),
