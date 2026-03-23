@@ -52,7 +52,6 @@ export type ClaimSubmissionInput = {
     igstAmount: number;
     transactionDate: string;
     basicAmount: number;
-    totalAmount: number;
     currencyCode: string;
     vendorName: string | null;
     receiptFilePath: string | null;
@@ -78,7 +77,6 @@ export type FinanceExpenseEditPayload = {
   billNo: string;
   vendorName: string | null;
   basicAmount: number;
-  totalAmount: number;
   purpose: string;
   productId: string | null;
   remarks: string | null;

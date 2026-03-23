@@ -68,16 +68,6 @@ export default async function DashboardPage() {
           </p>
         ) : null}
 
-        <div className="mt-8 rounded-xl border border-slate-200 bg-slate-50 p-4 transition-colors dark:border-slate-800 dark:bg-slate-900/70">
-          <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-200">
-            Secure Entry Confirmed
-          </h2>
-          <p className="mt-2 text-sm text-slate-600 dark:text-slate-400">
-            This dashboard route is validated through a withAuth-protected API gate and domain
-            policy enforcement.
-          </p>
-        </div>
-
         <WalletSummary summary={walletSummary} />
 
         <div className="mt-8 flex flex-wrap gap-3">

@@ -45,7 +45,7 @@ const expenseDetailSchema = z.object({
     igstAmount: z.number().min(0, "IGST amount cannot be negative"),
     transactionDate: z.iso.date("Transaction date is required"),
     basicAmount: z.number().min(0, "Basic amount cannot be negative"),
-    totalAmount: z.number().min(0, "Total amount cannot be negative"),
+    totalAmount: z.number().min(0, "Total amount cannot be negative").optional(),
     currencyCode: z.string().trim().min(1).default("INR"),
     vendorName: optionalTextToNA,
     receiptFileName: optionalTextToNA,
@@ -173,20 +173,6 @@ export const newClaimSubmitSchema = z
           code: "custom",
           message: "GST number is required when GST is applicable.",
           path: ["expense", "gstNumber"],
-        });
-      }
-
-      const computedTotal =
-        value.expense.basicAmount +
-        value.expense.cgstAmount +
-        value.expense.sgstAmount +
-        value.expense.igstAmount;
-
-      if (Math.abs(computedTotal - value.expense.totalAmount) > 0.01) {
-        context.addIssue({
-          code: "custom",
-          message: "Total amount must equal basic amount + GST components.",
-          path: ["expense", "totalAmount"],
         });
       }
 

@@ -205,15 +205,13 @@ export function FinanceEditClaimForm({ claim, products, action }: FinanceEditCla
               </label>
 
               <label className="grid gap-1 text-sm text-slate-200">
-                Total Amount
+                Total Amount (Read-only)
                 <input
-                  name="totalAmount"
                   type="number"
                   step="0.01"
-                  min="0"
-                  required
-                  defaultValue={expense?.totalAmount ?? ""}
-                  className="rounded-lg border border-slate-700 bg-slate-900/70 px-3 py-2 text-sm text-slate-100"
+                  disabled
+                  value={expense?.totalAmount ?? ""}
+                  className="rounded-lg border border-indigo-700/60 bg-indigo-950/40 px-3 py-2 text-sm text-indigo-100/80"
                 />
               </label>
 

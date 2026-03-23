@@ -174,6 +174,18 @@ function getFormDataNumber(input: FormData, key: string): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function computeExpenseTotalAmount(input: {
+  basicAmount: number;
+  cgstAmount: number;
+  sgstAmount: number;
+  igstAmount: number;
+}): number {
+  return (
+    Math.round((input.basicAmount + input.cgstAmount + input.sgstAmount + input.igstAmount) * 100) /
+    100
+  );
+}
+
 function getFormDataBoolean(input: FormData, key: string): boolean {
   const value = getFormDataString(input, key);
   return value === "true";
@@ -237,7 +249,6 @@ function extractSubmissionInput(input: unknown): {
       igstAmount: getFormDataNumber(input, "expense.igstAmount"),
       transactionDate: getFormDataString(input, "expense.transactionDate"),
       basicAmount: getFormDataNumber(input, "expense.basicAmount"),
-      totalAmount: getFormDataNumber(input, "expense.totalAmount"),
       currencyCode: getFormDataString(input, "expense.currencyCode"),
       vendorName: getFormDataNullableString(input, "expense.vendorName"),
       receiptFileName: getFormDataNullableString(input, "expense.receiptFileName"),
@@ -485,7 +496,12 @@ export async function submitClaimAction(input: unknown): Promise<{
       const duplicateTransactionResult = await repository.existsExpenseByCompositeKey({
         billNo: parseResult.data.expense.billNo,
         transactionDate: parseResult.data.expense.transactionDate,
-        totalAmount: parseResult.data.expense.totalAmount,
+        totalAmount: computeExpenseTotalAmount({
+          basicAmount: parseResult.data.expense.basicAmount,
+          cgstAmount: parseResult.data.expense.cgstAmount,
+          sgstAmount: parseResult.data.expense.sgstAmount,
+          igstAmount: parseResult.data.expense.igstAmount,
+        }),
       });
 
       if (duplicateTransactionResult.errorMessage) {
@@ -629,7 +645,6 @@ export async function submitClaimAction(input: unknown): Promise<{
             igstAmount: parseResult.data.expense.igstAmount,
             transactionDate: parseResult.data.expense.transactionDate,
             basicAmount: parseResult.data.expense.basicAmount,
-            totalAmount: parseResult.data.expense.totalAmount,
             currencyCode: parseResult.data.expense.currencyCode,
             vendorName: parseResult.data.expense.vendorName,
             receiptFilePath: uploadedReceiptFilePath,
@@ -696,7 +711,6 @@ function buildFinanceEditPayload(formData: FormData): unknown {
       billNo: getFormDataString(formData, "billNo"),
       vendorName: getFormDataNullableString(formData, "vendorName"),
       basicAmount: getFormDataNumber(formData, "basicAmount"),
-      totalAmount: getFormDataNumber(formData, "totalAmount"),
       purpose: getFormDataString(formData, "purpose"),
       productId,
       remarks: getFormDataNullableString(formData, "remarks"),
@@ -833,7 +847,6 @@ export async function updateClaimByFinanceAction(input: {
       billNo: parseResult.data.billNo,
       vendorName: parseResult.data.vendorName,
       basicAmount: parseResult.data.basicAmount,
-      totalAmount: parseResult.data.totalAmount,
       purpose: parseResult.data.purpose,
       productId: parseResult.data.productId,
       remarks: parseResult.data.remarks,

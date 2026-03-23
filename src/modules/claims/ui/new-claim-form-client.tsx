@@ -418,7 +418,6 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
       appendFormDataValue(formData, "expense.igstAmount", values.expense.igstAmount);
       appendFormDataValue(formData, "expense.transactionDate", values.expense.transactionDate);
       appendFormDataValue(formData, "expense.basicAmount", values.expense.basicAmount);
-      appendFormDataValue(formData, "expense.totalAmount", values.expense.totalAmount);
       appendFormDataValue(formData, "expense.currencyCode", values.expense.currencyCode);
       appendFormDataValue(formData, "expense.vendorName", values.expense.vendorName);
       appendFormDataValue(formData, "expense.peopleInvolved", values.expense.peopleInvolved);
@@ -788,8 +787,6 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
           <h2 className="text-sm font-semibold text-slate-900">Expense Details</h2>
 
           <input type="hidden" {...register("detailType")} value="expense" />
-          <input type="hidden" {...register("expense.totalAmount", { valueAsNumber: true })} />
-
           <div className="grid gap-1">
             <label htmlFor="billNo" className="text-sm font-medium text-slate-700">
               Bill No <span className="text-rose-600">*</span>

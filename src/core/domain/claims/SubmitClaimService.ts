@@ -38,10 +38,6 @@ function assertNonNegativeMoney(value: number, field: string): void {
   }
 }
 
-function roundToPaise(value: number): number {
-  return Math.round((value + Number.EPSILON) * 100) / 100;
-}
-
 function validateExpenseIntegrity(input: ClaimSubmissionInput): void {
   if (!input.expense) {
     throw new ClaimIntegrityError("Data integrity failure: Missing expense payload");
@@ -51,18 +47,6 @@ function validateExpenseIntegrity(input: ClaimSubmissionInput): void {
   assertNonNegativeMoney(input.expense.cgstAmount, "expense.cgst_amount");
   assertNonNegativeMoney(input.expense.sgstAmount, "expense.sgst_amount");
   assertNonNegativeMoney(input.expense.igstAmount, "expense.igst_amount");
-  assertNonNegativeMoney(input.expense.totalAmount, "expense.total_amount");
-
-  const serverCalculatedTotal = roundToPaise(
-    input.expense.basicAmount +
-      input.expense.cgstAmount +
-      input.expense.sgstAmount +
-      input.expense.igstAmount,
-  );
-
-  if (roundToPaise(input.expense.totalAmount) !== serverCalculatedTotal) {
-    throw new ClaimIntegrityError("Data integrity failure: Total amount mismatch");
-  }
 }
 
 function validateAdvanceIntegrity(input: ClaimSubmissionInput): void {
@@ -269,13 +253,6 @@ export class SubmitClaimService {
       };
 
       if (input.detailType === "expense" && input.expense) {
-        const serverCalculatedTotal = roundToPaise(
-          input.expense.basicAmount +
-            input.expense.cgstAmount +
-            input.expense.sgstAmount +
-            input.expense.igstAmount,
-        );
-
         payload.expense = {
           bill_no: input.expense.billNo,
           transaction_id: input.expense.transactionId,
@@ -290,7 +267,6 @@ export class SubmitClaimService {
           igst_amount: input.expense.igstAmount,
           transaction_date: input.expense.transactionDate,
           basic_amount: input.expense.basicAmount,
-          total_amount: serverCalculatedTotal,
           currency_code: input.expense.currencyCode,
           vendor_name: input.expense.vendorName,
           receipt_file_path: input.expense.receiptFilePath,

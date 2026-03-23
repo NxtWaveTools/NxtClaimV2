@@ -32,7 +32,6 @@ export const financeExpenseEditSchema = z
     billNo: z.string().trim().min(1, "Bill number is required"),
     vendorName: normalizedNullableText,
     basicAmount: z.number().positive("Basic amount must be greater than zero"),
-    totalAmount: z.number().min(0, "Total amount cannot be negative"),
     purpose: z.string().trim().min(1, "Purpose is required"),
     productId: uuidSchema.nullable(),
     remarks: normalizedNullableText,

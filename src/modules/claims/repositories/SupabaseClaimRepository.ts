@@ -886,7 +886,6 @@ export class SupabaseClaimRepository implements ClaimRepository {
           bill_no: payload.billNo,
           vendor_name: payload.vendorName,
           basic_amount: payload.basicAmount,
-          total_amount: payload.totalAmount,
           purpose: payload.purpose,
           product_id: payload.productId,
           remarks: payload.remarks,
