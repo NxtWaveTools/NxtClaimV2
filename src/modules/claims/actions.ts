@@ -48,7 +48,8 @@ const claimIdSchema = z.string().trim().min(1, "Claim ID is required");
 const claimDecisionSchema = z.object({
   claimId: claimIdSchema,
   redirectToApprovalsView: z.boolean().optional(),
-  rejectionReason: z.string().trim().min(1).optional(),
+  rejectionReason: z.string().trim().min(5).optional(),
+  allowResubmission: z.boolean().optional(),
 });
 const financeEditClaimIdSchema = z.object({
   claimId: claimIdSchema,
@@ -897,11 +898,13 @@ async function processL1ClaimDecisionAction(input: {
   decision: "approve" | "reject";
   redirectToApprovalsView?: boolean;
   rejectionReason?: string;
+  allowResubmission?: boolean;
 }): Promise<{ ok: boolean; message?: string }> {
   const parseResult = claimDecisionSchema.safeParse({
     claimId: input.claimId,
     redirectToApprovalsView: input.redirectToApprovalsView,
     rejectionReason: input.rejectionReason,
+    allowResubmission: input.allowResubmission,
   });
 
   if (!parseResult.success) {
@@ -924,6 +927,7 @@ async function processL1ClaimDecisionAction(input: {
     actorUserId: currentUserResult.user.id,
     decision: input.decision,
     rejectionReason: parseResult.data.rejectionReason,
+    allowResubmission: parseResult.data.allowResubmission,
   });
 
   if (!result.ok) {
@@ -948,11 +952,13 @@ async function processL2ClaimDecisionAction(input: {
   decision: "approve" | "reject" | "mark-paid";
   redirectToApprovalsView?: boolean;
   rejectionReason?: string;
+  allowResubmission?: boolean;
 }): Promise<{ ok: boolean; message?: string }> {
   const parseResult = claimDecisionSchema.safeParse({
     claimId: input.claimId,
     redirectToApprovalsView: input.redirectToApprovalsView,
     rejectionReason: input.rejectionReason,
+    allowResubmission: input.allowResubmission,
   });
 
   if (!parseResult.success) {
@@ -975,6 +981,7 @@ async function processL2ClaimDecisionAction(input: {
     actorUserId: currentUserResult.user.id,
     decision: input.decision,
     rejectionReason: parseResult.data.rejectionReason,
+    allowResubmission: parseResult.data.allowResubmission,
   });
 
   if (!result.ok) {
@@ -1009,12 +1016,14 @@ export async function rejectClaimAction(input: {
   claimId: string;
   redirectToApprovalsView?: boolean;
   rejectionReason: string;
+  allowResubmission: boolean;
 }): Promise<{ ok: boolean; message?: string }> {
   return processL1ClaimDecisionAction({
     claimId: input.claimId,
     decision: "reject",
     redirectToApprovalsView: input.redirectToApprovalsView,
     rejectionReason: input.rejectionReason,
+    allowResubmission: input.allowResubmission,
   });
 }
 
@@ -1033,12 +1042,14 @@ export async function rejectFinanceAction(input: {
   claimId: string;
   redirectToApprovalsView?: boolean;
   rejectionReason: string;
+  allowResubmission: boolean;
 }): Promise<{ ok: boolean; message?: string }> {
   return processL2ClaimDecisionAction({
     claimId: input.claimId,
     decision: "reject",
     redirectToApprovalsView: input.redirectToApprovalsView,
     rejectionReason: input.rejectionReason,
+    allowResubmission: input.allowResubmission,
   });
 }
 

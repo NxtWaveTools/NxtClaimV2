@@ -18,6 +18,7 @@ import { ClaimRejectWithReasonForm } from "@/modules/claims/ui/claim-reject-with
 import { ClaimDecisionActionForm } from "@/modules/claims/ui/claim-decision-action-form";
 import { ClaimStatusBadge } from "@/modules/claims/ui/claim-status-badge";
 import { FinanceEditClaimForm } from "@/modules/claims/ui/finance-edit-claim-form";
+import { ClaimAuditTimeline } from "@/modules/claims/ui/claim-audit-timeline";
 
 type PageProps = {
   params: Promise<{ id: string }>;
@@ -155,6 +156,8 @@ export default async function ClaimDetailPage({ params, searchParams }: PageProp
   }
 
   const claim = claimResult.data;
+  const claimAuditLogsResult = await claimRepository.getClaimAuditLogs(claim.id);
+  const claimAuditLogs = claimAuditLogsResult.errorMessage ? [] : claimAuditLogsResult.data;
   const currentUserId = currentUserResult.user.id;
   const financeApproverIdsResult =
     await claimRepository.getFinanceApproverIdsForUser(currentUserId);
@@ -203,7 +206,13 @@ export default async function ClaimDetailPage({ params, searchParams }: PageProp
   const rejectFromDetail = async (formData: FormData) => {
     "use server";
     const rejectionReason = String(formData.get("rejectionReason") ?? "").trim();
-    await rejectClaimAction({ claimId: claim.id, redirectToApprovalsView: true, rejectionReason });
+    const allowResubmission = formData.get("allowResubmission") === "true";
+    await rejectClaimAction({
+      claimId: claim.id,
+      redirectToApprovalsView: true,
+      rejectionReason,
+      allowResubmission,
+    });
   };
 
   const approveFinanceFromDetail = async () => {
@@ -214,10 +223,12 @@ export default async function ClaimDetailPage({ params, searchParams }: PageProp
   const rejectFinanceFromDetail = async (formData: FormData) => {
     "use server";
     const rejectionReason = String(formData.get("rejectionReason") ?? "").trim();
+    const allowResubmission = formData.get("allowResubmission") === "true";
     await rejectFinanceAction({
       claimId: claim.id,
       redirectToApprovalsView: true,
       rejectionReason,
+      allowResubmission,
     });
   };
 
@@ -470,6 +481,15 @@ export default async function ClaimDetailPage({ params, searchParams }: PageProp
             >
               Back to My Claims approvals
             </Link>
+          </div>
+
+          <div className="mt-6">
+            <ClaimAuditTimeline logs={claimAuditLogs} />
+            {claimAuditLogsResult.errorMessage ? (
+              <p className="mt-2 text-xs text-rose-600 dark:text-rose-300">
+                Unable to load complete audit history. {claimAuditLogsResult.errorMessage}
+              </p>
+            ) : null}
           </div>
         </section>
 

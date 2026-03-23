@@ -16,9 +16,11 @@ type ProcessL1ClaimDecisionRepository = {
   getPrimaryFinanceApproverId(): Promise<{ data: string | null; errorMessage: string | null }>;
   updateClaimL1Decision(input: {
     claimId: string;
+    actorUserId: string;
     status: DbClaimStatus;
     assignedL2ApproverId: string | null;
     rejectionReason: string | null;
+    allowResubmission: boolean;
   }): Promise<{ errorMessage: string | null }>;
 };
 
@@ -42,6 +44,7 @@ export class ProcessL1ClaimDecisionService {
     actorUserId: string;
     decision: DecisionType;
     rejectionReason?: string;
+    allowResubmission?: boolean;
   }): Promise<{ ok: boolean; errorMessage: string | null }> {
     const claimResult = await this.repository.getClaimForL1Decision(input.claimId);
 
@@ -71,15 +74,17 @@ export class ProcessL1ClaimDecisionService {
     if (input.decision === "reject") {
       const normalizedReason = input.rejectionReason?.trim() ?? "";
 
-      if (!normalizedReason) {
+      if (normalizedReason.length < 5) {
         return { ok: false, errorMessage: "Rejection reason is required." };
       }
 
       const rejectResult = await this.repository.updateClaimL1Decision({
         claimId: input.claimId,
+        actorUserId: input.actorUserId,
         status: DB_CLAIM_STATUSES[4],
         assignedL2ApproverId: claimResult.data.assignedL2ApproverId,
         rejectionReason: normalizedReason,
+        allowResubmission: input.allowResubmission === true,
       });
 
       if (rejectResult.errorMessage) {
@@ -119,9 +124,11 @@ export class ProcessL1ClaimDecisionService {
 
     const approveResult = await this.repository.updateClaimL1Decision({
       claimId: input.claimId,
+      actorUserId: input.actorUserId,
       status: DB_CLAIM_STATUSES[1],
       assignedL2ApproverId,
       rejectionReason: null,
+      allowResubmission: false,
     });
 
     if (approveResult.errorMessage) {

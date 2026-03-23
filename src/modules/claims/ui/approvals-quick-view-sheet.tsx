@@ -5,7 +5,9 @@ import Link from "next/link";
 import { Eye, X } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
 import { ROUTES } from "@/core/config/route-registry";
+import type { ClaimAuditLogRecord } from "@/core/domain/claims/contracts";
 import { ClaimSemanticDownloadButton } from "@/modules/claims/ui/claim-semantic-download-button";
+import { ClaimAuditTimeline } from "@/modules/claims/ui/claim-audit-timeline";
 
 type ApprovalsQuickViewSheetProps = {
   claimId: string;
@@ -22,6 +24,7 @@ type ApprovalsQuickViewSheetProps = {
   expenseBankStatementSignedUrl: string | null;
   advanceSupportingDocumentPath: string | null;
   advanceSupportingDocumentSignedUrl: string | null;
+  auditLogs: ClaimAuditLogRecord[];
   children?: ReactNode;
 };
 
@@ -57,6 +60,7 @@ export function ApprovalsQuickViewSheet({
   expenseBankStatementSignedUrl,
   advanceSupportingDocumentPath,
   advanceSupportingDocumentSignedUrl,
+  auditLogs,
   children,
 }: ApprovalsQuickViewSheetProps) {
   const [isOpen, setIsOpen] = useState(false);
@@ -263,6 +267,14 @@ export function ApprovalsQuickViewSheet({
                 </p>
               </article>
             </section>
+
+            <div className="mt-5">
+              <ClaimAuditTimeline
+                logs={auditLogs}
+                title="Audit History"
+                emptyLabel="No audit history available for this claim yet."
+              />
+            </div>
 
             <section className="mt-6 border-t border-slate-200 pt-4 dark:border-slate-800">
               <p className="mb-3 text-xs font-semibold uppercase tracking-[0.1em] text-slate-500 dark:text-slate-400">

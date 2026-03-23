@@ -182,6 +182,30 @@ export type MyClaimListRecord = {
   submittedAt: string;
   hodActionDate: string | null;
   financeActionDate: string | null;
+  submitterEmail: string | null;
+  hodEmail: string | null;
+  financeEmail: string | null;
+};
+
+export type ClaimAuditActionType =
+  | "SUBMITTED"
+  | "L1_APPROVED"
+  | "L1_REJECTED"
+  | "L2_APPROVED"
+  | "L2_REJECTED";
+
+export type ClaimAuditLogRecord = {
+  id: string;
+  claimId: string;
+  actorId: string;
+  actorName: string | null;
+  actorEmail: string | null;
+  actionType: ClaimAuditActionType;
+  assignedToId: string | null;
+  assignedToName: string | null;
+  assignedToEmail: string | null;
+  remarks: string | null;
+  createdAt: string;
 };
 
 export type PendingApprovalListRecord = {
@@ -248,6 +272,17 @@ export type ClaimRepository = {
   createClaimWithDetail(
     payload: Record<string, unknown>,
   ): Promise<{ claimId: string | null; errorMessage: string | null }>;
+  createClaimAuditLog(input: {
+    claimId: string;
+    actorId: string;
+    actionType: ClaimAuditActionType;
+    assignedToId: string | null;
+    remarks: string | null;
+  }): Promise<{ errorMessage: string | null }>;
+  getClaimAuditLogs(claimId: string): Promise<{
+    data: ClaimAuditLogRecord[];
+    errorMessage: string | null;
+  }>;
   getClaimForFinanceEdit(claimId: string): Promise<{
     data: ClaimFinanceEditSnapshot | null;
     errorMessage: string | null;

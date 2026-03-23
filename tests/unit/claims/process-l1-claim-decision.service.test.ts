@@ -54,6 +54,7 @@ describe("ProcessL1ClaimDecisionService", () => {
       status: "HOD approved - Awaiting finance approval",
       assignedL2ApproverId: "finance-approver-1",
       rejectionReason: null,
+      allowResubmission: false,
     });
   });
 
@@ -74,6 +75,28 @@ describe("ProcessL1ClaimDecisionService", () => {
       status: "Rejected",
       assignedL2ApproverId: null,
       rejectionReason: "Missing policy compliance evidence.",
+      allowResubmission: false,
+    });
+  });
+
+  test("passes allowResubmission when rejecting", async () => {
+    const repository = createRepository();
+    const service = new ProcessL1ClaimDecisionService({ repository, logger: createLogger() });
+
+    await service.execute({
+      claimId: "claim-1",
+      actorUserId: "hod-1",
+      decision: "reject",
+      rejectionReason: "Missing policy compliance evidence.",
+      allowResubmission: true,
+    });
+
+    expect(repository.updateClaimL1Decision).toHaveBeenCalledWith({
+      claimId: "claim-1",
+      status: "Rejected",
+      assignedL2ApproverId: null,
+      rejectionReason: "Missing policy compliance evidence.",
+      allowResubmission: true,
     });
   });
 

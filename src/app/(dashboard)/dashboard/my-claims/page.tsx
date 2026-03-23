@@ -5,6 +5,7 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { ROUTES } from "@/core/config/route-registry";
 import { DB_CLAIM_STATUSES, type DbClaimStatus } from "@/core/constants/statuses";
 import type {
+  ClaimAuditLogRecord,
   ClaimDateTarget,
   ClaimSearchField,
   ClaimSubmissionType,
@@ -212,6 +213,25 @@ function formatAmount(amount: number): string {
   }).format(amount);
 }
 
+function DateWithActor({
+  dateValue,
+  actorEmail,
+}: {
+  dateValue: string | null;
+  actorEmail: string | null;
+}) {
+  if (!dateValue && !actorEmail) {
+    return <span>-</span>;
+  }
+
+  return (
+    <div className="flex flex-col">
+      <span>{formatDate(dateValue)}</span>
+      <span className="text-xs text-muted-foreground">{actorEmail ?? "-"}</span>
+    </div>
+  );
+}
+
 function isRenderableEvidencePath(path: string | null): path is string {
   return Boolean(path && path.trim() !== "" && path !== "N/A");
 }
@@ -299,6 +319,25 @@ async function resolveApprovalEvidenceUrls(
   return Object.fromEntries(signedEntries);
 }
 
+async function resolveAuditLogsByClaimId(
+  claimRepository: SupabaseClaimRepository,
+  claimIds: string[],
+): Promise<Record<string, ClaimAuditLogRecord[]>> {
+  const entries = await Promise.all(
+    claimIds.map(async (claimId) => {
+      const result = await claimRepository.getClaimAuditLogs(claimId);
+
+      if (result.errorMessage) {
+        return [claimId, []] as const;
+      }
+
+      return [claimId, result.data] as const;
+    }),
+  );
+
+  return Object.fromEntries(entries);
+}
+
 function resolveApprovalActionMode(params: {
   activeScope: "l1" | "finance" | null;
   status: DbClaimStatus;
@@ -377,6 +416,10 @@ async function ClaimsCommandCenterTable({
 
     const rows = approvalsResult.data;
     const evidenceSignedUrlByClaimId = await resolveApprovalEvidenceUrls(claimRepository, rows);
+    const auditLogsByClaimId = await resolveAuditLogsByClaimId(
+      claimRepository,
+      rows.map((claim) => claim.id),
+    );
     const gatedStatuses = {
       l1: DB_CLAIM_STATUSES[0],
       finance: DB_CLAIM_STATUSES[1],
@@ -432,7 +475,12 @@ async function ClaimsCommandCenterTable({
                     const rejectFromList = async (formData: FormData) => {
                       "use server";
                       const rejectionReason = String(formData.get("rejectionReason") ?? "").trim();
-                      await rejectClaimAction({ claimId: claim.id, rejectionReason });
+                      const allowResubmission = formData.get("allowResubmission") === "true";
+                      await rejectClaimAction({
+                        claimId: claim.id,
+                        rejectionReason,
+                        allowResubmission,
+                      });
                     };
 
                     const approveFinanceFromList = async () => {
@@ -443,7 +491,12 @@ async function ClaimsCommandCenterTable({
                     const rejectFinanceFromList = async (formData: FormData) => {
                       "use server";
                       const rejectionReason = String(formData.get("rejectionReason") ?? "").trim();
-                      await rejectFinanceAction({ claimId: claim.id, rejectionReason });
+                      const allowResubmission = formData.get("allowResubmission") === "true";
+                      await rejectFinanceAction({
+                        claimId: claim.id,
+                        rejectionReason,
+                        allowResubmission,
+                      });
                     };
 
                     const markPaidFromList = async () => {
@@ -599,6 +652,7 @@ async function ClaimsCommandCenterTable({
                               advanceSupportingDocumentSignedUrl={
                                 evidenceSignedUrls.advanceSupportingDocumentSignedUrl
                               }
+                              auditLogs={auditLogsByClaimId[claim.id] ?? []}
                             >
                               {renderActions(false)}
                             </ApprovalsQuickViewSheet>
@@ -701,9 +755,21 @@ async function ClaimsCommandCenterTable({
                     <td className="px-4 py-3">
                       <ClaimStatusBadge status={claim.status} />
                     </td>
-                    <td className="px-4 py-3">{formatDate(claim.submittedAt)}</td>
-                    <td className="px-4 py-3">{formatDate(claim.hodActionDate)}</td>
-                    <td className="px-4 py-3">{formatDate(claim.financeActionDate)}</td>
+                    <td className="px-4 py-3">
+                      <DateWithActor
+                        dateValue={claim.submittedAt}
+                        actorEmail={claim.submitterEmail}
+                      />
+                    </td>
+                    <td className="px-4 py-3">
+                      <DateWithActor dateValue={claim.hodActionDate} actorEmail={claim.hodEmail} />
+                    </td>
+                    <td className="px-4 py-3">
+                      <DateWithActor
+                        dateValue={claim.financeActionDate}
+                        actorEmail={claim.financeEmail}
+                      />
+                    </td>
                   </tr>
                 ))}
               </tbody>

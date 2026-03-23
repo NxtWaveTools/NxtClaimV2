@@ -5,6 +5,8 @@ import {
   mapCanonicalStatusToDbStatuses,
 } from "@/core/constants/statuses";
 import type {
+  ClaimAuditActionType,
+  ClaimAuditLogRecord,
   ClaimDepartmentApprovers,
   ClaimExportRecord,
   ClaimDropdownOption,
@@ -86,6 +88,26 @@ type EnterpriseClaimsDashboardRow = {
   detail_type: "expense" | "advance";
   submission_type: "Self" | "On Behalf";
   created_at: string;
+  submitter_email: string | null;
+  hod_email: string | null;
+  finance_email: string | null;
+};
+
+type ClaimAuditLogActorRow = {
+  full_name: string | null;
+  email: string | null;
+};
+
+type ClaimAuditLogRow = {
+  id: string;
+  claim_id: string;
+  actor_id: string;
+  action_type: ClaimAuditActionType;
+  assigned_to_id: string | null;
+  remarks: string | null;
+  created_at: string;
+  actor: ClaimAuditLogActorRow | ClaimAuditLogActorRow[] | null;
+  assigned_to: ClaimAuditLogActorRow | ClaimAuditLogActorRow[] | null;
 };
 
 type DepartmentApproverRoleRow = {
@@ -181,6 +203,7 @@ type ClaimDetailRow = {
   on_behalf_email: string | null;
   status: DbClaimStatus;
   rejection_reason: string | null;
+  is_resubmission_allowed: boolean;
   submitted_at: string;
   department_id: string;
   payment_mode_id: string;
@@ -686,9 +709,11 @@ export class SupabaseClaimRepository implements ClaimRepository {
 
   async updateClaimL1Decision(input: {
     claimId: string;
+    actorUserId: string;
     status: DbClaimStatus;
     assignedL2ApproverId: string | null;
     rejectionReason: string | null;
+    allowResubmission: boolean;
   }): Promise<{ errorMessage: string | null }> {
     const client = getServiceRoleSupabaseClient();
     const isL1TerminalStatus =
@@ -701,6 +726,7 @@ export class SupabaseClaimRepository implements ClaimRepository {
         status: input.status,
         assigned_l2_approver_id: input.assignedL2ApproverId,
         rejection_reason: input.rejectionReason,
+        is_resubmission_allowed: input.allowResubmission,
         hod_action_at: isL1TerminalStatus ? new Date().toISOString() : null,
       })
       .eq("id", input.claimId)
@@ -708,6 +734,51 @@ export class SupabaseClaimRepository implements ClaimRepository {
 
     if (error) {
       return { errorMessage: error.message };
+    }
+
+    if (input.status === DB_CLAIM_STATUSES[4] && input.allowResubmission) {
+      const [{ error: expenseDeactivateError }, { error: advanceDeactivateError }] =
+        await Promise.all([
+          client
+            .from("expense_details")
+            .update({ is_active: false })
+            .eq("claim_id", input.claimId)
+            .eq("is_active", true),
+          client
+            .from("advance_details")
+            .update({ is_active: false })
+            .eq("claim_id", input.claimId)
+            .eq("is_active", true),
+        ]);
+
+      if (expenseDeactivateError) {
+        return { errorMessage: expenseDeactivateError.message };
+      }
+
+      if (advanceDeactivateError) {
+        return { errorMessage: advanceDeactivateError.message };
+      }
+    }
+
+    const auditActionType: ClaimAuditActionType | null =
+      input.status === DB_CLAIM_STATUSES[1]
+        ? "L1_APPROVED"
+        : input.status === DB_CLAIM_STATUSES[4]
+          ? "L1_REJECTED"
+          : null;
+
+    if (auditActionType) {
+      const auditResult = await this.createClaimAuditLog({
+        claimId: input.claimId,
+        actorId: input.actorUserId,
+        actionType: auditActionType,
+        assignedToId: auditActionType === "L1_APPROVED" ? input.assignedL2ApproverId : null,
+        remarks: input.rejectionReason,
+      });
+
+      if (auditResult.errorMessage) {
+        return { errorMessage: auditResult.errorMessage };
+      }
     }
 
     return { errorMessage: null };
@@ -747,9 +818,11 @@ export class SupabaseClaimRepository implements ClaimRepository {
 
   async updateClaimL2Decision(input: {
     claimId: string;
+    actorUserId: string;
     status: DbClaimStatus;
     assignedL2ApproverId: string | null;
     rejectionReason: string | null;
+    allowResubmission: boolean;
   }): Promise<{ errorMessage: string | null }> {
     const client = getServiceRoleSupabaseClient();
     const isFinanceTerminalStatus =
@@ -763,6 +836,7 @@ export class SupabaseClaimRepository implements ClaimRepository {
         status: input.status,
         assigned_l2_approver_id: input.assignedL2ApproverId,
         rejection_reason: input.rejectionReason,
+        is_resubmission_allowed: input.allowResubmission,
         finance_action_at: isFinanceTerminalStatus ? new Date().toISOString() : null,
       })
       .eq("id", input.claimId)
@@ -772,10 +846,55 @@ export class SupabaseClaimRepository implements ClaimRepository {
       return { errorMessage: error.message };
     }
 
+    if (input.status === DB_CLAIM_STATUSES[4] && input.allowResubmission) {
+      const [{ error: expenseDeactivateError }, { error: advanceDeactivateError }] =
+        await Promise.all([
+          client
+            .from("expense_details")
+            .update({ is_active: false })
+            .eq("claim_id", input.claimId)
+            .eq("is_active", true),
+          client
+            .from("advance_details")
+            .update({ is_active: false })
+            .eq("claim_id", input.claimId)
+            .eq("is_active", true),
+        ]);
+
+      if (expenseDeactivateError) {
+        return { errorMessage: expenseDeactivateError.message };
+      }
+
+      if (advanceDeactivateError) {
+        return { errorMessage: advanceDeactivateError.message };
+      }
+    }
+
     if (input.status === PAYMENT_DONE_CLOSED_STATUS) {
       const walletUpdateResult = await this.updateWalletTotalsForClosedClaim(input.claimId);
       if (walletUpdateResult.errorMessage) {
         return { errorMessage: walletUpdateResult.errorMessage };
+      }
+    }
+
+    const auditActionType: ClaimAuditActionType | null =
+      input.status === DB_CLAIM_STATUSES[2]
+        ? "L2_APPROVED"
+        : input.status === DB_CLAIM_STATUSES[4]
+          ? "L2_REJECTED"
+          : null;
+
+    if (auditActionType) {
+      const auditResult = await this.createClaimAuditLog({
+        claimId: input.claimId,
+        actorId: input.actorUserId,
+        actionType: auditActionType,
+        assignedToId: null,
+        remarks: input.rejectionReason,
+      });
+
+      if (auditResult.errorMessage) {
+        return { errorMessage: auditResult.errorMessage };
       }
     }
 
@@ -828,7 +947,7 @@ export class SupabaseClaimRepository implements ClaimRepository {
     const { data, error } = await client
       .from("claims")
       .select(
-        "id, employee_id, submission_type, detail_type, on_behalf_email, status, rejection_reason, submitted_at, department_id, payment_mode_id, assigned_l1_approver_id, assigned_l2_approver_id, submitted_by, submitter_user:users!claims_submitted_by_fkey(full_name, email), master_departments(name), master_payment_modes(name), expense_details(bill_no, purpose, transaction_date, basic_amount, cgst_amount, sgst_amount, igst_amount, total_amount, vendor_name, product_id, remarks, receipt_file_path, bank_statement_file_path), advance_details(purpose, requested_amount, expected_usage_date, product_id, remarks, supporting_document_path)",
+        "id, employee_id, submission_type, detail_type, on_behalf_email, status, rejection_reason, is_resubmission_allowed, submitted_at, department_id, payment_mode_id, assigned_l1_approver_id, assigned_l2_approver_id, submitted_by, submitter_user:users!claims_submitted_by_fkey(full_name, email), master_departments(name), master_payment_modes(name), expense_details(bill_no, purpose, transaction_date, basic_amount, cgst_amount, sgst_amount, igst_amount, total_amount, vendor_name, product_id, remarks, receipt_file_path, bank_statement_file_path), advance_details(purpose, requested_amount, expected_usage_date, product_id, remarks, supporting_document_path)",
       )
       .eq("id", claimId)
       .eq("is_active", true)
@@ -1295,7 +1414,94 @@ export class SupabaseClaimRepository implements ClaimRepository {
       return { claimId: null, errorMessage: "Claim creation returned unexpected response." };
     }
 
+    const actorId = typeof payload.submitted_by === "string" ? payload.submitted_by : null;
+    const assignedToId =
+      typeof payload.assigned_l1_approver_id === "string" ? payload.assigned_l1_approver_id : null;
+
+    if (!actorId) {
+      return { claimId: null, errorMessage: "Missing submitter for claim audit log creation." };
+    }
+
+    const auditResult = await this.createClaimAuditLog({
+      claimId: data,
+      actorId,
+      actionType: "SUBMITTED",
+      assignedToId,
+      remarks: null,
+    });
+
+    if (auditResult.errorMessage) {
+      return {
+        claimId: null,
+        errorMessage: `Claim created but audit logging failed: ${auditResult.errorMessage}`,
+      };
+    }
+
     return { claimId: data, errorMessage: null };
+  }
+
+  async createClaimAuditLog(input: {
+    claimId: string;
+    actorId: string;
+    actionType: ClaimAuditActionType;
+    assignedToId: string | null;
+    remarks: string | null;
+  }): Promise<{ errorMessage: string | null }> {
+    const client = getServiceRoleSupabaseClient();
+    const { error } = await client.from("claim_audit_logs").insert({
+      claim_id: input.claimId,
+      actor_id: input.actorId,
+      action_type: input.actionType,
+      assigned_to_id: input.assignedToId,
+      remarks: input.remarks,
+    });
+
+    if (error) {
+      return { errorMessage: error.message };
+    }
+
+    return { errorMessage: null };
+  }
+
+  async getClaimAuditLogs(claimId: string): Promise<{
+    data: ClaimAuditLogRecord[];
+    errorMessage: string | null;
+  }> {
+    const client = getServiceRoleSupabaseClient();
+    const { data, error } = await client
+      .from("claim_audit_logs")
+      .select(
+        "id, claim_id, actor_id, action_type, assigned_to_id, remarks, created_at, actor:users!claim_audit_logs_actor_id_fkey(full_name, email), assigned_to:users!claim_audit_logs_assigned_to_id_fkey(full_name, email)",
+      )
+      .eq("claim_id", claimId)
+      .order("created_at", { ascending: true });
+
+    if (error) {
+      return { data: [], errorMessage: error.message };
+    }
+
+    const rows = (data ?? []) as ClaimAuditLogRow[];
+    return {
+      data: rows.map((row) => {
+        const actor = getSingleRelation(row.actor);
+        const assignedTo = getSingleRelation(row.assigned_to);
+
+        return {
+          id: row.id,
+          claimId: row.claim_id,
+          actorId: row.actor_id,
+          actorName: actor?.full_name ?? null,
+          actorEmail: actor?.email ?? null,
+          actionType: row.action_type,
+          assignedToId: row.assigned_to_id,
+          assignedToName: assignedTo?.full_name ?? null,
+          assignedToEmail: assignedTo?.email ?? null,
+          remarks: row.remarks,
+          createdAt: row.created_at,
+        };
+      }),
+      errorMessage: null,
+    };
   }
 
   async getMyClaims(
@@ -1411,6 +1617,9 @@ export class SupabaseClaimRepository implements ClaimRepository {
       submittedAt: string;
       hodActionDate: string | null;
       financeActionDate: string | null;
+      submitterEmail: string | null;
+      hodEmail: string | null;
+      financeEmail: string | null;
     }>;
     nextCursor: string | null;
     hasNextPage: boolean;
@@ -1434,7 +1643,7 @@ export class SupabaseClaimRepository implements ClaimRepository {
     let query = client
       .from("vw_enterprise_claims_dashboard")
       .select(
-        "claim_id, employee_name, employee_id, department_name, type_of_claim, amount, status, submitted_on, hod_action_date, finance_action_date, submitted_by, on_behalf_of_id, department_id, payment_mode_id, detail_type, submission_type, created_at",
+        "claim_id, employee_name, employee_id, department_name, type_of_claim, amount, status, submitted_on, hod_action_date, finance_action_date, submitted_by, on_behalf_of_id, department_id, payment_mode_id, detail_type, submission_type, created_at, submitter_email, hod_email, finance_email",
       )
       .or(
         decodedCursor
@@ -1484,6 +1693,9 @@ export class SupabaseClaimRepository implements ClaimRepository {
       submittedAt: row.submitted_on,
       hodActionDate: row.hod_action_date,
       financeActionDate: row.finance_action_date,
+      submitterEmail: row.submitter_email,
+      hodEmail: row.hod_email,
+      financeEmail: row.finance_email,
     }));
 
     return {

@@ -360,18 +360,38 @@ async function loginToContext(
   const page = await context.newPage();
   await page.goto("/auth/login", { waitUntil: "domcontentloaded" });
 
-  await page.getByLabel(/work email/i).fill(email);
-  await page.getByLabel(/^password$/i).fill(password);
+  const emailInput = page.getByLabel(/work email/i);
+  const passwordInput = page.getByLabel(/^password$/i);
+  await emailInput.fill(email);
+  await passwordInput.fill(password);
+
   await page.getByRole("button", { name: /sign in with email/i }).click();
 
-  await page.waitForURL("**/dashboard", { timeout: 60000 });
+  const errorToast = page.locator(".text-destructive, [role='alert']").first();
+  const dashboardHeading = page.getByRole("heading", { name: /dashboard|wallet/i }).first();
+
   await Promise.race([
-    page.getByRole("heading", { name: /dashboard/i }).waitFor({ state: "visible", timeout: 15000 }),
-    page
-      .getByRole("heading", { name: /wallet summary/i })
-      .waitFor({ state: "visible", timeout: 15000 }),
-    page.getByRole("link", { name: /my claims/i }).waitFor({ state: "visible", timeout: 15000 }),
+    errorToast.waitFor({ state: "visible", timeout: 15000 }).catch(() => undefined),
+    dashboardHeading.waitFor({ state: "visible", timeout: 15000 }).catch(() => undefined),
   ]);
+
+  if (await errorToast.isVisible().catch(() => false)) {
+    const errorText = (await errorToast.innerText()).trim();
+    if (errorText.length > 0) {
+      throw new Error(`Login Failed: ${errorText}`);
+    }
+  }
+
+  await expect
+    .poll(
+      async () => {
+        const hasDashboardUrl = page.url().includes("/dashboard");
+        const myClaimsLinkCount = await page.locator('a[href="/dashboard/my-claims"]').count();
+        return hasDashboardUrl || myClaimsLinkCount > 0;
+      },
+      { timeout: 60000 },
+    )
+    .toBe(true);
 
   return page;
 }
@@ -394,7 +414,6 @@ async function setupActorSessions(browser: Browser, actors: RuntimeActors): Prom
       context,
       page,
     });
-    await page.waitForTimeout(1500);
   }
 }
 
@@ -465,15 +484,17 @@ async function openNewClaimForm(page: Page): Promise<void> {
 
 async function resolveClaimIdByBillNo(submitterId: string, billNo: string): Promise<string> {
   const client = getAdminSupabaseClient();
-  const { data, error } = await client
-    .from("claims")
-    .select("id, expense_details!inner(bill_no)")
-    .eq("submitted_by", submitterId)
-    .eq("expense_details.bill_no", billNo)
-    .eq("is_active", true)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  const { data, error } = await querySupabaseWithRetry(() =>
+    client
+      .from("claims")
+      .select("id, expense_details!inner(bill_no)")
+      .eq("submitted_by", submitterId)
+      .eq("expense_details.bill_no", billNo)
+      .eq("is_active", true)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+  );
 
   if (error) {
     throw new Error(`Failed to resolve claim id for bill no ${billNo}: ${error.message}`);
@@ -491,15 +512,17 @@ async function resolveClaimIdByAdvancePurpose(
   purpose: string,
 ): Promise<string> {
   const client = getAdminSupabaseClient();
-  const { data, error } = await client
-    .from("claims")
-    .select("id, advance_details!inner(purpose)")
-    .eq("submitted_by", submitterId)
-    .eq("advance_details.purpose", purpose)
-    .eq("is_active", true)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  const { data, error } = await querySupabaseWithRetry(() =>
+    client
+      .from("claims")
+      .select("id, advance_details!inner(purpose)")
+      .eq("submitted_by", submitterId)
+      .eq("advance_details.purpose", purpose)
+      .eq("is_active", true)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+  );
 
   if (error) {
     throw new Error(`Failed to resolve claim id for advance purpose ${purpose}: ${error.message}`);
@@ -516,6 +539,39 @@ function newMarker(prefix: string): string {
   return `${prefix}-${RUN_TAG}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
 }
 
+function shouldRetrySupabaseError(message: string): boolean {
+  const normalized = message.toLowerCase();
+  return normalized.includes("fetch failed") || normalized.includes("network");
+}
+
+async function querySupabaseWithRetry<T>(
+  queryFn: () => PromiseLike<{ data: T; error: { message: string } | null }>,
+): Promise<{ data: T; error: { message: string } | null }> {
+  let lastResult: { data: T; error: { message: string } | null } | null = null;
+
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    const result = await queryFn();
+    lastResult = result;
+
+    if (!result.error) {
+      return result;
+    }
+
+    if (!shouldRetrySupabaseError(result.error.message) || attempt === 3) {
+      return result;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 500 * attempt));
+  }
+
+  return (
+    lastResult ?? {
+      data: null as T,
+      error: { message: "Query failed without a response." },
+    }
+  );
+}
+
 async function submitReimbursementClaim(
   page: Page,
   input: {
@@ -525,13 +581,14 @@ async function submitReimbursementClaim(
     workflowLabel: string;
     onBehalfOfEmail?: string;
     onBehalfOfEmployeeCode?: string;
+    billNoOverride?: string;
   },
 ): Promise<SubmittedClaim> {
   await openNewClaimForm(page);
 
   const marker = newMarker(input.workflowLabel);
   const employeeCode = `${input.actorRole.toUpperCase()}-${marker}`;
-  const billNo = `BILL-${marker}`;
+  const billNo = input.billNoOverride ?? `BILL-${marker}`;
   const transactionId = `TXN-${marker}`;
 
   if (input.onBehalfOfEmail && input.onBehalfOfEmployeeCode) {
@@ -665,6 +722,15 @@ async function approveAtCurrentScope(page: Page, claimId: string): Promise<void>
 }
 
 async function rejectAtCurrentScope(page: Page, claimId: string, reason: string): Promise<void> {
+  await rejectAtCurrentScopeWithOptions(page, claimId, reason, { allowResubmission: false });
+}
+
+async function rejectAtCurrentScopeWithOptions(
+  page: Page,
+  claimId: string,
+  reason: string,
+  input: { allowResubmission: boolean },
+): Promise<void> {
   await openApprovalsHistory(page);
   const row = claimRow(page, claimId);
   await expect(row).toBeVisible({ timeout: 30000 });
@@ -674,14 +740,18 @@ async function rejectAtCurrentScope(page: Page, claimId: string, reason: string)
     .first()
     .click();
 
-  const reasonBox = row.locator("textarea[name='rejectionReason']").first();
+  const reasonBox = page.locator("textarea[name='rejectionReason']").first();
   await expect(reasonBox).toBeVisible({ timeout: 10000 });
   await reasonBox.fill(reason);
 
-  await row
-    .getByRole("button", { name: /^reject$/i })
-    .last()
-    .click();
+  const allowResubmissionCheckbox = page.locator("input[name='allowResubmission']").first();
+  if (input.allowResubmission) {
+    await allowResubmissionCheckbox.check();
+  } else {
+    await allowResubmissionCheckbox.uncheck();
+  }
+
+  await page.getByRole("button", { name: /confirm rejection/i }).click();
   await expect(page.getByText(/rejected\./i)).toBeVisible({ timeout: 30000 });
 }
 
@@ -753,13 +823,15 @@ async function expectClaimStatusInApprovals(
 
 async function assertClaimStatusInDb(claimId: string, expectedStatus: string): Promise<void> {
   const client = getAdminSupabaseClient();
-  const { data, error } = await client
-    .from("claims")
-    .select("status")
-    .eq("id", claimId)
-    .eq("is_active", true)
-    .limit(1)
-    .maybeSingle();
+  const { data, error } = await querySupabaseWithRetry(() =>
+    client
+      .from("claims")
+      .select("status")
+      .eq("id", claimId)
+      .eq("is_active", true)
+      .limit(1)
+      .maybeSingle(),
+  );
 
   if (error) {
     throw new Error(`Failed to assert status for claim ${claimId}: ${error.message}`);
@@ -770,13 +842,15 @@ async function assertClaimStatusInDb(claimId: string, expectedStatus: string): P
 
 async function getClaimRouting(claimId: string): Promise<ClaimRouting> {
   const client = getAdminSupabaseClient();
-  const { data, error } = await client
-    .from("claims")
-    .select("department_id, status, assigned_l1_approver_id, assigned_l2_approver_id")
-    .eq("id", claimId)
-    .eq("is_active", true)
-    .limit(1)
-    .maybeSingle();
+  const { data, error } = await querySupabaseWithRetry(() =>
+    client
+      .from("claims")
+      .select("department_id, status, assigned_l1_approver_id, assigned_l2_approver_id")
+      .eq("id", claimId)
+      .eq("is_active", true)
+      .limit(1)
+      .maybeSingle(),
+  );
 
   if (error) {
     throw new Error(`Failed to read routing for claim ${claimId}: ${error.message}`);
@@ -801,12 +875,14 @@ async function assertClaimRouting(claimId: string, expectedL1ApproverId: string)
 
 async function getWalletPettyCashBalance(userId: string): Promise<number> {
   const client = getAdminSupabaseClient();
-  const { data, error } = await client
-    .from("wallets")
-    .select("petty_cash_balance")
-    .eq("user_id", userId)
-    .limit(1)
-    .maybeSingle();
+  const { data, error } = await querySupabaseWithRetry(() =>
+    client
+      .from("wallets")
+      .select("petty_cash_balance")
+      .eq("user_id", userId)
+      .limit(1)
+      .maybeSingle(),
+  );
 
   if (error) {
     throw new Error(`Strict wallets table query failed for user ${userId}: ${error.message}`);
@@ -1034,6 +1110,118 @@ test.describe("Claims Workflow Multi-Role E2E", () => {
 
     const walletAfter = await getWalletPettyCashBalance(runtimeActors.submitter.id);
     assertWalletDelta(walletBefore, walletAfter, -amount);
+  });
+
+  test("Flow 8: Standard Reject Blocks Duplicates", async () => {
+    const submitterPage = getActorPage("submitter");
+    const hodPage = getActorPage("hod");
+    const duplicateBillNo = "BILL-REJECT-001";
+    const duplicateAmount = 100;
+
+    const firstSubmitted = await submitReimbursementClaim(submitterPage, {
+      actorRole: "submitter",
+      departmentName: runtimeActors.submitterDepartment.name,
+      amount: duplicateAmount,
+      workflowLabel: "FLOW8-STRICT-REJECT",
+      billNoOverride: duplicateBillNo,
+    });
+
+    await rejectAtCurrentScopeWithOptions(
+      hodPage,
+      firstSubmitted.claimId,
+      "Strict rejection test.",
+      {
+        allowResubmission: false,
+      },
+    );
+    await assertClaimStatusInDb(firstSubmitted.claimId, "Rejected");
+
+    await openNewClaimForm(submitterPage);
+    await selectDropdownOption(submitterPage, "Department", runtimeActors.submitterDepartment.name);
+    await selectDropdownOption(submitterPage, "Payment Mode", "Reimbursement");
+    await selectDropdownOption(
+      submitterPage,
+      "Expense Category",
+      runtimeActors.expenseCategoryName,
+    );
+
+    const secondMarker = newMarker("FLOW8-DUPLICATE-ATTEMPT");
+    await submitterPage.locator("#employeeId").fill(`SUBMITTER-${secondMarker}`);
+    await submitterPage.locator("#billNo").fill(duplicateBillNo);
+    await submitterPage.locator("#transactionId").fill(`TXN-${secondMarker}`);
+    await submitterPage.locator("#expensePurpose").fill(`FLOW8 duplicate attempt ${secondMarker}`);
+    await submitterPage.locator("#transactionDate").fill("2026-03-18");
+    await submitterPage.locator("#basicAmount").fill(String(duplicateAmount));
+    await submitterPage.locator("#receiptFile").setInputFiles(RECEIPT_PATH);
+    await submitterPage.getByRole("button", { name: /submit claim/i }).click();
+
+    await expect(
+      submitterPage.getByText(/exact Bill No, Date, and Amount already exists/i),
+    ).toBeVisible({ timeout: 30000 });
+  });
+
+  test("Flow 9: Resubmission Reject Allows Duplicates", async () => {
+    const submitterPage = getActorPage("submitter");
+    const hodPage = getActorPage("hod");
+    const duplicateBillNo = "BILL-RESUBMIT-001";
+    const duplicateAmount = 200;
+
+    const firstSubmitted = await submitReimbursementClaim(submitterPage, {
+      actorRole: "submitter",
+      departmentName: runtimeActors.submitterDepartment.name,
+      amount: duplicateAmount,
+      workflowLabel: "FLOW9-RESUBMISSION-REJECT",
+      billNoOverride: duplicateBillNo,
+    });
+
+    await rejectAtCurrentScopeWithOptions(
+      hodPage,
+      firstSubmitted.claimId,
+      "Resubmission allowed test.",
+      {
+        allowResubmission: true,
+      },
+    );
+    await assertClaimStatusInDb(firstSubmitted.claimId, "Rejected");
+
+    const secondSubmitted = await submitReimbursementClaim(submitterPage, {
+      actorRole: "submitter",
+      departmentName: runtimeActors.submitterDepartment.name,
+      amount: duplicateAmount,
+      workflowLabel: "FLOW9-DUPLICATE-SHOULD-PASS",
+      billNoOverride: duplicateBillNo,
+    });
+
+    await assertClaimStatusInDb(secondSubmitted.claimId, "Submitted - Awaiting HOD approval");
+    await expectClaimVisibleInMyClaims(submitterPage, secondSubmitted.claimId, true);
+  });
+
+  test("Flow 10: Audit Timeline Renders Correctly", async () => {
+    const submitterPage = getActorPage("submitter");
+
+    const submitted = await submitReimbursementClaim(submitterPage, {
+      actorRole: "submitter",
+      departmentName: runtimeActors.submitterDepartment.name,
+      amount: 188.55,
+      workflowLabel: "FLOW10-AUDIT-TIMELINE",
+    });
+
+    await submitterPage.goto(`/dashboard/claims/${submitted.claimId}`, {
+      waitUntil: "domcontentloaded",
+    });
+
+    await expect(submitterPage.getByRole("heading", { name: /claim detail/i })).toBeVisible({
+      timeout: 30000,
+    });
+
+    const auditSection = submitterPage
+      .locator("section")
+      .filter({ has: submitterPage.getByText(/audit history/i) })
+      .first();
+
+    await expect(auditSection).toBeVisible({ timeout: 30000 });
+    await expect(auditSection).toContainText(/claim submitted/i);
+    await expect(auditSection).toContainText(runtimeActors.submitter.email);
   });
 
   test("Edge Workflow A (AI-generated): cross-department routing locks to target L1 approver and isolates original HOD", async () => {

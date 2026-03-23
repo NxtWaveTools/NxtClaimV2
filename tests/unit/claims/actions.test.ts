@@ -414,6 +414,7 @@ describe("claims actions", () => {
       actorUserId: "11111111-1111-4111-8111-111111111111",
       decision: "approve",
       rejectionReason: undefined,
+      allowResubmission: undefined,
     });
     expect(mockRevalidatePath).toHaveBeenCalledWith("/dashboard/my-claims");
   });
@@ -425,6 +426,7 @@ describe("claims actions", () => {
       claimId: "11111111-1111-4111-8111-111111111111",
       redirectToApprovalsView: true,
       rejectionReason: "Invalid bill metadata",
+      allowResubmission: true,
     });
 
     expect(mockProcessL1DecisionExecute).toHaveBeenCalledWith({
@@ -432,6 +434,7 @@ describe("claims actions", () => {
       actorUserId: "11111111-1111-4111-8111-111111111111",
       decision: "reject",
       rejectionReason: "Invalid bill metadata",
+      allowResubmission: true,
     });
     expect(mockRedirect).toHaveBeenCalledWith("/dashboard/my-claims?view=approvals");
   });
@@ -447,6 +450,7 @@ describe("claims actions", () => {
       actorUserId: "11111111-1111-4111-8111-111111111111",
       decision: "approve",
       rejectionReason: undefined,
+      allowResubmission: undefined,
     });
   });
 
@@ -461,6 +465,7 @@ describe("claims actions", () => {
       actorUserId: "11111111-1111-4111-8111-111111111111",
       decision: "mark-paid",
       rejectionReason: undefined,
+      allowResubmission: undefined,
     });
   });
 
@@ -470,6 +475,7 @@ describe("claims actions", () => {
     const result = await rejectFinanceAction({
       claimId: "11111111-1111-4111-8111-111111111111",
       rejectionReason: "Claim amount mismatch",
+      allowResubmission: false,
     });
 
     expect(result).toEqual({ ok: true });
@@ -478,6 +484,7 @@ describe("claims actions", () => {
       actorUserId: "11111111-1111-4111-8111-111111111111",
       decision: "reject",
       rejectionReason: "Claim amount mismatch",
+      allowResubmission: false,
     });
   });
 });

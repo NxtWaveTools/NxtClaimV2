@@ -2,7 +2,6 @@
 
 import { useState, type FormEvent } from "react";
 import { toast } from "sonner";
-import { ClaimDecisionSubmitButton } from "@/modules/claims/ui/claim-decision-submit-button";
 
 type ClaimRejectWithReasonFormProps = {
   action: (formData: FormData) => Promise<void>;
@@ -13,7 +12,7 @@ export function ClaimRejectWithReasonForm({
   action,
   compact = false,
 }: ClaimRejectWithReasonFormProps) {
-  const [isExpanded, setIsExpanded] = useState(false);
+  const [isModalOpen, setIsModalOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
@@ -32,18 +31,19 @@ export function ClaimRejectWithReasonForm({
         success: "Claim rejected.",
         error: (error) => (error instanceof Error ? error.message : "Unable to reject claim."),
       });
-      setIsExpanded(false);
+      setIsModalOpen(false);
+      event.currentTarget.reset();
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  if (!isExpanded) {
-    return (
+  return (
+    <>
       <button
         type="button"
         onClick={() => {
-          setIsExpanded(true);
+          setIsModalOpen(true);
         }}
         className={
           compact
@@ -53,49 +53,82 @@ export function ClaimRejectWithReasonForm({
       >
         Reject
       </button>
-    );
-  }
 
-  return (
-    <form
-      onSubmit={handleSubmit}
-      className={compact ? "flex min-w-[220px] items-end gap-2" : "grid gap-2"}
-    >
-      <div className="grid flex-1 gap-1">
-        <label
-          htmlFor="rejectionReason"
-          className="text-xs font-medium uppercase tracking-[0.08em] text-rose-300"
-        >
-          Rejection Reason
-        </label>
-        <textarea
-          id="rejectionReason"
-          name="rejectionReason"
-          required
-          minLength={3}
-          disabled={isSubmitting}
-          rows={compact ? 2 : 3}
-          className="w-full rounded-lg border border-rose-700/40 bg-rose-950/30 px-2.5 py-2 text-xs text-rose-100 outline-none ring-rose-500 transition focus:ring"
-          placeholder="Enter reason"
-        />
-      </div>
-      <div className={compact ? "flex items-center gap-2" : "flex items-center gap-3"}>
-        <ClaimDecisionSubmitButton decision="reject" compact={compact} pending={isSubmitting} />
-        <button
-          type="button"
-          disabled={isSubmitting}
-          onClick={() => {
-            setIsExpanded(false);
-          }}
-          className={
-            compact
-              ? "inline-flex h-8 items-center justify-center rounded-lg border border-slate-600 px-2 text-xs font-semibold text-slate-300 transition-all duration-200 hover:bg-slate-800 active:scale-[0.98]"
-              : "inline-flex items-center justify-center rounded-xl border border-slate-600 px-3 py-2 text-sm font-semibold text-slate-300 transition-all duration-200 hover:bg-slate-800 active:scale-[0.98]"
-          }
-        >
-          Cancel
-        </button>
-      </div>
-    </form>
+      {isModalOpen ? (
+        <div className="fixed inset-0 z-50">
+          <button
+            type="button"
+            aria-label="Close reject dialog"
+            className="absolute inset-0 bg-slate-900/50"
+            disabled={isSubmitting}
+            onClick={() => {
+              setIsModalOpen(false);
+            }}
+          />
+          <div className="absolute left-1/2 top-1/2 w-[92vw] max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl dark:border-slate-800 dark:bg-zinc-950 sm:p-6">
+            <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+              Reject Claim
+            </h3>
+            <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
+              Add a rejection reason and choose whether the employee can resubmit this exact bill.
+            </p>
+
+            <form onSubmit={handleSubmit} className="mt-4 grid gap-4">
+              <div className="grid gap-1.5">
+                <label
+                  htmlFor="rejectionReason"
+                  className="text-xs font-medium uppercase tracking-[0.08em] text-slate-600 dark:text-slate-300"
+                >
+                  Reason for Rejection
+                </label>
+                <textarea
+                  id="rejectionReason"
+                  name="rejectionReason"
+                  required
+                  minLength={5}
+                  disabled={isSubmitting}
+                  rows={4}
+                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none ring-indigo-500 transition focus:ring dark:border-slate-700 dark:bg-zinc-900 dark:text-slate-100"
+                  placeholder="Enter at least 5 characters"
+                />
+              </div>
+
+              <label className="inline-flex items-start gap-2.5 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-800 dark:bg-zinc-900">
+                <input
+                  type="checkbox"
+                  name="allowResubmission"
+                  value="true"
+                  disabled={isSubmitting}
+                  className="mt-0.5 h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 dark:border-slate-700"
+                />
+                <span className="text-sm text-slate-700 dark:text-slate-300">
+                  Allow employee to resubmit this exact bill/receipt
+                </span>
+              </label>
+
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                <button
+                  type="button"
+                  disabled={isSubmitting}
+                  onClick={() => {
+                    setIsModalOpen(false);
+                  }}
+                  className="inline-flex items-center justify-center rounded-xl border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 transition-all duration-200 hover:bg-slate-100 active:scale-[0.98] disabled:opacity-60 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-zinc-800"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="inline-flex items-center justify-center rounded-xl border border-rose-300 bg-rose-50 px-4 py-2 text-sm font-semibold text-rose-700 transition-all duration-200 hover:bg-rose-100 active:scale-[0.98] disabled:opacity-60 dark:border-rose-700/60 dark:bg-rose-950/20 dark:text-rose-300 dark:hover:bg-rose-950/40"
+                >
+                  {isSubmitting ? "Processing..." : "Confirm Rejection"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
+    </>
   );
 }
