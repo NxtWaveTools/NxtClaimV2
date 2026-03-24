@@ -35,9 +35,12 @@ import { ApprovalsAuditModeDialog } from "@/modules/claims/ui/approvals-quick-vi
 import { ClaimSemanticDownloadButton } from "@/modules/claims/ui/claim-semantic-download-button";
 
 const PAGE_SIZE = 10;
-
-type SearchParamsValue = string | string[] | undefined;
-type ViewMode = "submissions" | "approvals";
+<p
+  aria-hidden="true"
+  className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-700 dark:text-slate-300"
+>
+  type SearchParamsValue = string | string[] | undefined;
+</p>;
 
 function firstParamValue(value: SearchParamsValue): string | undefined {
   if (Array.isArray(value)) {
@@ -422,14 +425,24 @@ async function ClaimsCommandCenterTable({
 
     const rows = approvalsResult.data;
 
-    if (approvalScope === "finance") {
-      const approvalsCountResult = await claimRepository.getFinancePendingApprovalsCount(
-        userId,
-        filters,
+    if (approvalScope === "finance" || approvalScope === "l1") {
+      const totalCount =
+        approvalScope === "finance"
+          ? (() => {
+              const approvalsCountResult = claimRepository.getFinancePendingApprovalsCount(
+                userId,
+                filters,
+              );
+              return approvalsCountResult;
+            })()
+          : Promise.resolve({ count: rows.length, errorMessage: null as string | null });
+
+      const resolvedTotalCount = await totalCount;
+      const evidenceSignedUrlByClaimId = await resolveApprovalEvidenceUrls(claimRepository, rows);
+      const auditLogsByClaimId = await resolveAuditLogsByClaimId(
+        claimRepository,
+        rows.map((claim) => claim.id),
       );
-      const totalCount = approvalsCountResult.errorMessage
-        ? rows.length
-        : approvalsCountResult.count;
 
       return (
         <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition-colors dark:border-slate-800 dark:bg-zinc-950">
@@ -441,11 +454,6 @@ async function ClaimsCommandCenterTable({
             </div>
           ) : rows.length === 0 ? (
             <>
-              <div className="border-b border-slate-200 px-4 py-3 dark:border-slate-800">
-                <h2 className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-700 dark:text-slate-300">
-                  Approvals History
-                </h2>
-              </div>
               <div className="grid place-items-center px-4 py-14 text-center">
                 <p className="text-sm font-medium text-slate-700 dark:text-slate-300">
                   No approvals history found.
@@ -464,14 +472,27 @@ async function ClaimsCommandCenterTable({
                   submitter: claim.submitter,
                   departmentName: claim.departmentName,
                   paymentModeName: claim.paymentModeName,
+                  detailType: claim.detailType,
+                  submissionType: claim.submissionType,
+                  onBehalfEmail: claim.onBehalfEmail,
+                  purpose: claim.purpose,
+                  categoryName: claim.categoryName,
+                  expenseReceiptFilePath: claim.expenseReceiptFilePath,
+                  expenseBankStatementFilePath: claim.expenseBankStatementFilePath,
+                  advanceSupportingDocumentPath: claim.advanceSupportingDocumentPath,
                   totalAmount: claim.totalAmount,
                   status: claim.status,
                   submittedAt: claim.submittedAt,
                   hodActionDate: null,
                   financeActionDate: null,
                 }))}
-                totalCount={totalCount}
+                totalCount={
+                  resolvedTotalCount.errorMessage ? rows.length : resolvedTotalCount.count
+                }
                 filters={filters}
+                approvalScope={approvalScope}
+                evidenceSignedUrlByClaimId={evidenceSignedUrlByClaimId}
+                auditLogsByClaimId={auditLogsByClaimId}
               />
 
               <MyClaimsPaginationControls
@@ -501,9 +522,12 @@ async function ClaimsCommandCenterTable({
     return (
       <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition-colors dark:border-slate-800 dark:bg-zinc-950">
         <div className="border-b border-slate-200 px-4 py-3 dark:border-slate-800">
-          <h2 className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-700 dark:text-slate-300">
+          <p
+            aria-hidden="true"
+            className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-700 dark:text-slate-300"
+          >
             Approvals History
-          </h2>
+          </p>
         </div>
 
         {approvalsResult.errorMessage ? (
@@ -878,23 +902,7 @@ export default async function MyClaimsDashboardPage({
   const currentUserResult = await authRepository.getCurrentUser();
 
   if (currentUserResult.errorMessage || !currentUserResult.user?.id) {
-    return (
-      <div className="min-h-screen bg-slate-50 px-6 py-8 dark:bg-[#0B0F1A]">
-        <main className="mx-auto max-w-6xl rounded-2xl border border-rose-200 bg-white p-6 shadow-sm transition-colors dark:border-rose-900/40 dark:bg-zinc-950">
-          <h1 className="text-xl font-semibold text-slate-900 dark:text-slate-100">My Claims</h1>
-          <p className="mt-3 rounded-xl bg-rose-50 px-3 py-2 text-sm text-rose-700 dark:bg-rose-950/40 dark:text-rose-200">
-            Unable to authenticate your session.{" "}
-            {currentUserResult.errorMessage ?? "Please log in again."}
-          </p>
-          <Link
-            href={ROUTES.login}
-            className="mt-4 inline-flex rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition-all duration-200 hover:bg-slate-700 active:scale-[0.98] dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-slate-200"
-          >
-            Go to Login
-          </Link>
-        </main>
-      </div>
-    );
+    redirect(ROUTES.login);
   }
 
   const resolvedSearchParams = await searchParams;
@@ -1002,6 +1010,12 @@ export default async function MyClaimsDashboardPage({
           products={products}
           expenseCategories={expenseCategories}
         />
+
+        {activeView === "approvals" ? (
+          <h2 className="sr-only" aria-label="Approvals History">
+            Approvals History
+          </h2>
+        ) : null}
 
         <Suspense fallback={<ClaimsTableSkeleton />}>
           <ClaimsCommandCenterTable

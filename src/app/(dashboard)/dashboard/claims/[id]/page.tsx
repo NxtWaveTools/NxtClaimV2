@@ -163,10 +163,13 @@ export default async function ClaimDetailPage({ params, searchParams }: PageProp
     await claimRepository.getFinanceApproverIdsForUser(currentUserId);
   const isFinanceActor =
     !financeApproverIdsResult.errorMessage && financeApproverIdsResult.data.length > 0;
+  const isAssignedL1Approver = currentUserId === claim.assignedL1ApproverId;
+  const isAssignedL2Approver = currentUserId === claim.assignedL2ApproverId;
   const canViewAsFinance = isFinanceActor && claim.status !== DB_CLAIM_STATUSES[0];
   const canView =
     currentUserId === claim.submittedBy ||
-    currentUserId === claim.assignedL1ApproverId ||
+    isAssignedL1Approver ||
+    isAssignedL2Approver ||
     canViewAsFinance;
   const canEditByFinance = isFinanceActor;
 
@@ -174,11 +177,11 @@ export default async function ClaimDetailPage({ params, searchParams }: PageProp
     notFound();
   }
 
-  const canTakeL1Decision =
-    currentUserId === claim.assignedL1ApproverId && claim.status === DB_CLAIM_STATUSES[0];
+  const canTakeL1Decision = isAssignedL1Approver && claim.status === DB_CLAIM_STATUSES[0];
   const canTakeFinanceAuthorizationDecision =
-    canViewAsFinance && claim.status === DB_CLAIM_STATUSES[1];
-  const canTakeFinanceExecutionDecision = canViewAsFinance && claim.status === DB_CLAIM_STATUSES[2];
+    isAssignedL2Approver && claim.status === DB_CLAIM_STATUSES[1];
+  const canTakeFinanceExecutionDecision =
+    isAssignedL2Approver && claim.status === DB_CLAIM_STATUSES[2];
   const canTakeDecision =
     canTakeL1Decision || canTakeFinanceAuthorizationDecision || canTakeFinanceExecutionDecision;
   const productsResult = canEditByFinance

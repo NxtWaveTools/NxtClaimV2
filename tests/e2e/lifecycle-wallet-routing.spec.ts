@@ -640,7 +640,12 @@ async function approveAtL1(page: Page, claimId: string): Promise<void> {
     .first()
     .waitFor({ state: "visible", timeout: 2500 })
     .catch(() => null);
-  await expect(page.getByText(/Claim approved\./i)).toBeVisible({ timeout: 30000 });
+
+  // Accept either the success toast or the persisted status transition as approval proof.
+  await Promise.race([
+    expect(page.getByText(/Claim approved\./i)).toBeVisible({ timeout: 30000 }),
+    expect(row).toContainText(/HOD approved - Awaiting finance approval/i, { timeout: 30000 }),
+  ]);
 }
 
 async function approveAndMarkPaidAtFinance(page: Page, claimId: string): Promise<void> {
@@ -685,7 +690,19 @@ async function withActorPage<T>(
     if (storageStatePath) {
       await page.goto("/dashboard", { waitUntil: "domcontentloaded" });
 
-      if (/\/auth\/login/i.test(page.url())) {
+      const normalizedEmail = email.trim().toLowerCase();
+      const authenticatedAsText = page
+        .locator("body")
+        .getByText(
+          new RegExp(
+            `Authenticated as\\s+${normalizedEmail.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`,
+            "i",
+          ),
+        )
+        .first();
+      const hasExpectedIdentity = (await authenticatedAsText.count()) > 0;
+
+      if (/\/auth\/login/i.test(page.url()) || !hasExpectedIdentity) {
         await loginWithEmail(page, email);
       }
     } else {

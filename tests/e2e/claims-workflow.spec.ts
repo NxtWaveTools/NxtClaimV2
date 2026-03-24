@@ -415,7 +415,19 @@ async function setupActorSessions(browser: Browser, actors: RuntimeActors): Prom
         page = await context.newPage();
         await page.goto("/dashboard", { waitUntil: "domcontentloaded" });
 
-        if (/\/auth\/login/i.test(page.url())) {
+        const normalizedEmail = email.trim().toLowerCase();
+        const authenticatedAsText = page
+          .locator("body")
+          .getByText(
+            new RegExp(
+              `Authenticated as\\s+${normalizedEmail.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`,
+              "i",
+            ),
+          )
+          .first();
+        const hasExpectedIdentity = (await authenticatedAsText.count()) > 0;
+
+        if (/\/auth\/login/i.test(page.url()) || !hasExpectedIdentity) {
           await page.close().catch(() => undefined);
           page = await loginToContext(context, email, DEFAULT_PASSWORD);
         }

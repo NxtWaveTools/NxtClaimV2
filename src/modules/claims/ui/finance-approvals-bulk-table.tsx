@@ -7,14 +7,22 @@ import { toast } from "sonner";
 import { DB_CLAIM_STATUSES, type DbClaimStatus } from "@/core/constants/statuses";
 import { ROUTES } from "@/core/config/route-registry";
 import {
+  approveClaimAction,
   approveFinanceAction,
   bulkApprove,
   bulkMarkPaid,
   bulkReject,
   markPaymentDoneAction,
+  rejectClaimAction,
   rejectFinanceAction,
 } from "@/modules/claims/actions";
-import type { GetMyClaimsFilters } from "@/core/domain/claims/contracts";
+import type {
+  ClaimAuditLogRecord,
+  ClaimDetailType,
+  ClaimSubmissionType,
+  GetMyClaimsFilters,
+} from "@/core/domain/claims/contracts";
+import { ApprovalsAuditModeDialog } from "@/modules/claims/ui/approvals-quick-view-sheet";
 import { ClaimDecisionActionForm } from "@/modules/claims/ui/claim-decision-action-form";
 import { ClaimRejectWithReasonForm } from "@/modules/claims/ui/claim-reject-with-reason-form";
 import { ClaimStatusBadge } from "@/modules/claims/ui/claim-status-badge";
@@ -25,6 +33,14 @@ type FinanceApprovalRow = {
   submitter: string;
   departmentName: string | null;
   paymentModeName: string;
+  detailType: ClaimDetailType;
+  submissionType: ClaimSubmissionType;
+  onBehalfEmail: string | null;
+  purpose: string | null;
+  categoryName: string;
+  expenseReceiptFilePath: string | null;
+  expenseBankStatementFilePath: string | null;
+  advanceSupportingDocumentPath: string | null;
   totalAmount: number;
   status: DbClaimStatus;
   submittedAt: string;
@@ -36,6 +52,16 @@ type FinanceApprovalsBulkTableProps = {
   rows: FinanceApprovalRow[];
   totalCount: number;
   filters: GetMyClaimsFilters;
+  approvalScope: "l1" | "finance";
+  evidenceSignedUrlByClaimId: Record<
+    string,
+    {
+      expenseReceiptSignedUrl: string | null;
+      expenseBankStatementSignedUrl: string | null;
+      advanceSupportingDocumentSignedUrl: string | null;
+    }
+  >;
+  auditLogsByClaimId: Record<string, ClaimAuditLogRecord[]>;
 };
 
 function formatDate(value: string | null): string {
@@ -89,6 +115,9 @@ export function FinanceApprovalsBulkTable({
   rows,
   totalCount,
   filters,
+  approvalScope,
+  evidenceSignedUrlByClaimId,
+  auditLogsByClaimId,
 }: FinanceApprovalsBulkTableProps) {
   const router = useRouter();
   const actionFilters = normalizeFilters(filters) as Parameters<typeof bulkApprove>[0]["filters"];
@@ -97,12 +126,28 @@ export function FinanceApprovalsBulkTable({
   const [isRejectModalOpen, setIsRejectModalOpen] = useState(false);
   const [isSubmittingBulkReject, setIsSubmittingBulkReject] = useState(false);
 
-  const pageIds = useMemo(() => rows.map((row) => row.id), [rows]);
-  const selectedOnPageCount = useMemo(
-    () => pageIds.filter((id) => selectedIds.includes(id)).length,
-    [pageIds, selectedIds],
+  const actionablePageIds = useMemo(
+    () =>
+      rows
+        .filter((row) => {
+          if (approvalScope === "l1") {
+            return row.status === "Submitted - Awaiting HOD approval";
+          }
+
+          return (
+            row.status === "HOD approved - Awaiting finance approval" ||
+            row.status === "Finance Approved - Payment under process"
+          );
+        })
+        .map((row) => row.id),
+    [approvalScope, rows],
   );
-  const isPageFullySelected = pageIds.length > 0 && selectedOnPageCount === pageIds.length;
+  const selectedOnPageCount = useMemo(
+    () => actionablePageIds.filter((id) => selectedIds.includes(id)).length,
+    [actionablePageIds, selectedIds],
+  );
+  const isPageFullySelected =
+    actionablePageIds.length > 0 && selectedOnPageCount === actionablePageIds.length;
   const selectedCount = isGlobalSelect ? totalCount : selectedIds.length;
   const canBulkAct = selectedCount > 0;
 
@@ -113,7 +158,7 @@ export function FinanceApprovalsBulkTable({
       return;
     }
 
-    setSelectedIds(pageIds);
+    setSelectedIds(actionablePageIds);
     setIsGlobalSelect(false);
   };
 
@@ -135,20 +180,37 @@ export function FinanceApprovalsBulkTable({
 
     await toast.promise(
       (async () => {
-        const result = await bulkApprove({
-          claimIds: selectedIds,
-          isGlobalSelect,
-          filters: actionFilters,
-        });
+        if (approvalScope === "l1") {
+          const targetIds = isGlobalSelect ? actionablePageIds : selectedIds;
 
-        if (!result.ok) {
-          throw new Error(result.message);
+          if (targetIds.length === 0) {
+            throw new Error("No actionable claims selected.");
+          }
+
+          for (const claimId of targetIds) {
+            const result = await approveClaimAction({ claimId });
+            if (!result.ok) {
+              throw new Error(result.message ?? "Unable to approve claim.");
+            }
+          }
+        } else {
+          const result = await bulkApprove({
+            claimIds: selectedIds,
+            isGlobalSelect,
+            filters: actionFilters,
+          });
+
+          if (!result.ok) {
+            throw new Error(result.message);
+          }
         }
 
         setSelectedIds([]);
         setIsGlobalSelect(false);
         router.refresh();
-        return result.message;
+        return approvalScope === "l1"
+          ? `${(isGlobalSelect ? actionablePageIds : selectedIds).length} claim(s) approved.`
+          : "Claims approved.";
       })(),
       {
         loading: "Bulk approving claims...",
@@ -159,6 +221,10 @@ export function FinanceApprovalsBulkTable({
   };
 
   const submitBulkMarkPaid = async () => {
+    if (approvalScope !== "finance") {
+      return;
+    }
+
     if (!canBulkAct) {
       return;
     }
@@ -203,22 +269,44 @@ export function FinanceApprovalsBulkTable({
     try {
       await toast.promise(
         (async () => {
-          const result = await bulkReject({
-            claimIds: selectedIds,
-            isGlobalSelect,
-            filters: actionFilters,
-            rejectionReason,
-          });
+          if (approvalScope === "l1") {
+            const targetIds = isGlobalSelect ? actionablePageIds : selectedIds;
 
-          if (!result.ok) {
-            throw new Error(result.message);
+            if (targetIds.length === 0) {
+              throw new Error("No actionable claims selected.");
+            }
+
+            for (const claimId of targetIds) {
+              const result = await rejectClaimAction({
+                claimId,
+                rejectionReason,
+                allowResubmission: false,
+              });
+
+              if (!result.ok) {
+                throw new Error(result.message ?? "Unable to reject claim.");
+              }
+            }
+          } else {
+            const result = await bulkReject({
+              claimIds: selectedIds,
+              isGlobalSelect,
+              filters: actionFilters,
+              rejectionReason,
+            });
+
+            if (!result.ok) {
+              throw new Error(result.message);
+            }
           }
 
           setSelectedIds([]);
           setIsGlobalSelect(false);
           setIsRejectModalOpen(false);
           router.refresh();
-          return result.message;
+          return approvalScope === "l1"
+            ? `${(isGlobalSelect ? actionablePageIds : selectedIds).length} claim(s) rejected.`
+            : "Claims rejected.";
         })(),
         {
           loading: "Bulk rejecting claims...",
@@ -235,9 +323,12 @@ export function FinanceApprovalsBulkTable({
     <>
       <div className="border-b border-slate-200 px-4 py-3 dark:border-slate-800">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h2 className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-700 dark:text-slate-300">
+          <p
+            aria-hidden="true"
+            className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-700 dark:text-slate-300"
+          >
             Approvals History
-          </h2>
+          </p>
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
@@ -259,14 +350,16 @@ export function FinanceApprovalsBulkTable({
             >
               Bulk Reject
             </button>
-            <button
-              type="button"
-              onClick={submitBulkMarkPaid}
-              disabled={!canBulkAct}
-              className="inline-flex h-8 items-center justify-center rounded-lg border border-indigo-300 bg-indigo-50 px-3 text-xs font-semibold text-indigo-700 transition-all duration-200 hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-indigo-700/60 dark:bg-indigo-950/20 dark:text-indigo-300 dark:hover:bg-indigo-950/40"
-            >
-              Bulk Mark Paid
-            </button>
+            {approvalScope === "finance" ? (
+              <button
+                type="button"
+                onClick={submitBulkMarkPaid}
+                disabled={!canBulkAct}
+                className="inline-flex h-8 items-center justify-center rounded-lg border border-indigo-300 bg-indigo-50 px-3 text-xs font-semibold text-indigo-700 transition-all duration-200 hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-indigo-700 dark:bg-indigo-950/20 dark:text-indigo-300 dark:hover:bg-indigo-950/40"
+              >
+                Bulk Mark Paid
+              </button>
+            ) : null}
           </div>
         </div>
 
@@ -277,7 +370,10 @@ export function FinanceApprovalsBulkTable({
         ) : null}
       </div>
 
-      {isPageFullySelected && !isGlobalSelect && totalCount > rows.length ? (
+      {isPageFullySelected &&
+      !isGlobalSelect &&
+      actionablePageIds.length === rows.length &&
+      totalCount > rows.length ? (
         <div className="mx-4 mt-3 rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm text-indigo-700 dark:border-indigo-800 dark:bg-indigo-950/20 dark:text-indigo-300">
           All {rows.length} claims on this page are selected.{" "}
           <button
@@ -299,7 +395,7 @@ export function FinanceApprovalsBulkTable({
             type="button"
             onClick={() => {
               setIsGlobalSelect(false);
-              setSelectedIds(pageIds);
+              setSelectedIds(actionablePageIds);
             }}
             className="ml-2 font-semibold underline underline-offset-2"
           >
@@ -319,6 +415,7 @@ export function FinanceApprovalsBulkTable({
                   onChange={(event) => {
                     toggleMaster(event.currentTarget.checked);
                   }}
+                  disabled={actionablePageIds.length === 0}
                   aria-label="Select all claims on this page"
                   data-testid="bulk-master-checkbox"
                   className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 dark:border-slate-700"
@@ -341,11 +438,19 @@ export function FinanceApprovalsBulkTable({
             {rows.map((claim) => {
               const isChecked = isGlobalSelect || selectedIds.includes(claim.id);
               const canApproveOrReject =
-                claim.status === "HOD approved - Awaiting finance approval";
-              const canMarkPaid = claim.status === "Finance Approved - Payment under process";
+                approvalScope === "l1"
+                  ? claim.status === "Submitted - Awaiting HOD approval"
+                  : claim.status === "HOD approved - Awaiting finance approval";
+              const canMarkPaid =
+                approvalScope === "finance" &&
+                claim.status === "Finance Approved - Payment under process";
+              const isActionable = canApproveOrReject || canMarkPaid;
 
               const approveSingle = async () => {
-                const result = await approveFinanceAction({ claimId: claim.id });
+                const result =
+                  approvalScope === "l1"
+                    ? await approveClaimAction({ claimId: claim.id })
+                    : await approveFinanceAction({ claimId: claim.id });
                 if (!result.ok) {
                   throw new Error(result.message ?? "Unable to approve claim.");
                 }
@@ -355,11 +460,18 @@ export function FinanceApprovalsBulkTable({
               const rejectSingle = async (formData: FormData) => {
                 const rejectionReason = String(formData.get("rejectionReason") ?? "").trim();
                 const allowResubmission = formData.get("allowResubmission") === "true";
-                const result = await rejectFinanceAction({
-                  claimId: claim.id,
-                  rejectionReason,
-                  allowResubmission,
-                });
+                const result =
+                  approvalScope === "l1"
+                    ? await rejectClaimAction({
+                        claimId: claim.id,
+                        rejectionReason,
+                        allowResubmission,
+                      })
+                    : await rejectFinanceAction({
+                        claimId: claim.id,
+                        rejectionReason,
+                        allowResubmission,
+                      });
 
                 if (!result.ok) {
                   throw new Error(result.message ?? "Unable to reject claim.");
@@ -382,15 +494,22 @@ export function FinanceApprovalsBulkTable({
                   className="group transition-colors hover:bg-slate-50/70 dark:hover:bg-slate-900/40"
                 >
                   <td className="px-4 py-3">
-                    <input
-                      type="checkbox"
-                      checked={isChecked}
-                      onChange={(event) => {
-                        toggleRow(claim.id, event.currentTarget.checked);
-                      }}
-                      aria-label={`Select claim ${claim.id}`}
-                      className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 dark:border-slate-700"
-                    />
+                    {isActionable ? (
+                      <input
+                        type="checkbox"
+                        checked={isChecked}
+                        onChange={(event) => {
+                          toggleRow(claim.id, event.currentTarget.checked);
+                        }}
+                        aria-label={`Select claim ${claim.id}`}
+                        className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 dark:border-slate-700"
+                      />
+                    ) : (
+                      <span
+                        aria-hidden="true"
+                        className="inline-block h-4 w-4 rounded border border-transparent"
+                      />
+                    )}
                   </td>
                   <td className="whitespace-nowrap px-4 py-3 font-medium text-slate-900 dark:text-slate-100">
                     <Link
@@ -421,6 +540,31 @@ export function FinanceApprovalsBulkTable({
                   </td>
                   <td className="whitespace-nowrap px-4 py-3 text-right">
                     <div className="flex min-w-[280px] flex-wrap items-start justify-end gap-2">
+                      <ApprovalsAuditModeDialog
+                        claimId={claim.id}
+                        detailType={claim.detailType}
+                        submitter={claim.submitter}
+                        amountLabel={formatAmount(claim.totalAmount)}
+                        categoryName={claim.categoryName}
+                        purpose={claim.purpose}
+                        submissionType={claim.submissionType}
+                        onBehalfEmail={claim.onBehalfEmail}
+                        expenseReceiptFilePath={claim.expenseReceiptFilePath}
+                        expenseReceiptSignedUrl={
+                          evidenceSignedUrlByClaimId[claim.id]?.expenseReceiptSignedUrl ?? null
+                        }
+                        expenseBankStatementFilePath={claim.expenseBankStatementFilePath}
+                        expenseBankStatementSignedUrl={
+                          evidenceSignedUrlByClaimId[claim.id]?.expenseBankStatementSignedUrl ??
+                          null
+                        }
+                        advanceSupportingDocumentPath={claim.advanceSupportingDocumentPath}
+                        advanceSupportingDocumentSignedUrl={
+                          evidenceSignedUrlByClaimId[claim.id]
+                            ?.advanceSupportingDocumentSignedUrl ?? null
+                        }
+                        auditLogs={auditLogsByClaimId[claim.id] ?? []}
+                      />
                       {canApproveOrReject ? (
                         <>
                           <ClaimDecisionActionForm
