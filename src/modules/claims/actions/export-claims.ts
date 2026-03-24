@@ -1,4 +1,6 @@
-import { NextResponse, type NextRequest } from "next/server";
+"use server";
+
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { DB_CLAIM_STATUSES, type DbClaimStatus } from "@/core/constants/statuses";
 import { ExportClaimsService } from "@/core/domain/claims/ExportClaimsService";
@@ -8,11 +10,19 @@ import type {
   ClaimSubmissionType,
   GetMyClaimsFilters,
 } from "@/core/domain/claims/contracts";
-import { withAuth, type AuthenticatedContext } from "@/core/http/with-auth";
 import { logger } from "@/core/infra/logging/logger";
+import { SupabaseServerAuthRepository } from "@/modules/auth/repositories/supabase-server-auth.repository";
 import { SupabaseClaimRepository } from "@/modules/claims/repositories/SupabaseClaimRepository";
 
-const scopeSchema = z.enum(["submissions", "approvals"]);
+const authRepository = new SupabaseServerAuthRepository();
+const repository = new SupabaseClaimRepository();
+const exportClaimsService = new ExportClaimsService({ repository, logger });
+
+const exportClaimsInputSchema = z.object({
+  scope: z.enum(["submissions", "approvals"]),
+  searchParams: z.string().default(""),
+});
+
 const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
 
 function normalizeSubmissionType(value: string | null): ClaimSubmissionType | undefined {
@@ -89,58 +99,72 @@ function buildClaimFilters(searchParams: URLSearchParams): GetMyClaimsFilters {
   };
 }
 
-const exportClaimsHandler = async (request: NextRequest, context: AuthenticatedContext) => {
-  const parsedScope = scopeSchema.safeParse(
-    request.nextUrl.searchParams.get("scope") ?? "submissions",
-  );
+export async function exportClaimsCsvAction(input: {
+  scope: "submissions" | "approvals";
+  searchParams: string;
+}): Promise<{
+  data: { csvData: string; fileName: string; rowCount: number } | null;
+  error: { code: string; message: string } | null;
+  meta: { correlationId: string };
+}> {
+  const correlationId = randomUUID();
+  const parseResult = exportClaimsInputSchema.safeParse(input);
 
-  if (!parsedScope.success) {
-    return NextResponse.json(
-      {
-        data: null,
-        error: {
-          code: "INVALID_EXPORT_SCOPE",
-          message: "scope must be either submissions or approvals",
-        },
-        meta: { correlationId: context.correlationId },
+  if (!parseResult.success) {
+    return {
+      data: null,
+      error: {
+        code: "INVALID_EXPORT_INPUT",
+        message: "Invalid export request.",
       },
-      { status: 400 },
-    );
+      meta: { correlationId },
+    };
   }
 
-  const claimRepository = new SupabaseClaimRepository();
-  const exportService = new ExportClaimsService({ repository: claimRepository, logger });
-  const filters = buildClaimFilters(request.nextUrl.searchParams);
+  const currentUserResult = await authRepository.getCurrentUser();
+  if (currentUserResult.errorMessage || !currentUserResult.user?.id) {
+    return {
+      data: null,
+      error: {
+        code: "UNAUTHORIZED",
+        message: currentUserResult.errorMessage ?? "Unauthorized session.",
+      },
+      meta: { correlationId },
+    };
+  }
 
-  const result = await exportService.execute({
-    userId: context.userId,
-    scope: parsedScope.data,
+  const filters = buildClaimFilters(new URLSearchParams(parseResult.data.searchParams));
+  const exportResult = await exportClaimsService.execute({
+    userId: currentUserResult.user.id,
+    scope: parseResult.data.scope,
     filters,
   });
 
-  if (result.errorMessage) {
-    return NextResponse.json(
-      {
-        data: null,
-        error: {
-          code: "EXPORT_FAILED",
-          message: result.errorMessage,
-        },
-        meta: { correlationId: context.correlationId },
+  if (exportResult.errorMessage) {
+    return {
+      data: null,
+      error: {
+        code: "EXPORT_FAILED",
+        message: exportResult.errorMessage,
       },
-      { status: 500 },
-    );
+      meta: { correlationId },
+    };
   }
 
-  return new NextResponse(result.csvData, {
-    status: 200,
-    headers: {
-      "Content-Type": "text/csv; charset=utf-8",
-      "Content-Disposition": `attachment; filename="${result.fileName}"`,
-      "Cache-Control": "no-store",
-      "X-Correlation-Id": context.correlationId,
-    },
+  logger.info("claims.export.server_action.success", {
+    correlationId,
+    userId: currentUserResult.user.id,
+    scope: parseResult.data.scope,
+    rowCount: exportResult.rowCount,
   });
-};
 
-export const GET = withAuth(exportClaimsHandler);
+  return {
+    data: {
+      csvData: exportResult.csvData,
+      fileName: exportResult.fileName,
+      rowCount: exportResult.rowCount,
+    },
+    error: null,
+    meta: { correlationId },
+  };
+}

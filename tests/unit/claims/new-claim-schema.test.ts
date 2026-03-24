@@ -100,6 +100,20 @@ describe("newClaimSubmitSchema", () => {
     expect(parsed.success).toBe(true);
   });
 
+  test("accepts bank statement metadata without base64 content", () => {
+    const parsed = newClaimSubmitSchema.safeParse({
+      ...validExpensePayload,
+      expense: {
+        ...validExpensePayload.expense,
+        bankStatementFileName: "bank-statement.pdf",
+        bankStatementFileType: "application/pdf",
+        bankStatementFileBase64: null,
+      },
+    });
+
+    expect(parsed.success).toBe(true);
+  });
+
   test("accepts advance without expected usage date", () => {
     const parsed = newClaimSubmitSchema.safeParse({
       ...validExpensePayload,

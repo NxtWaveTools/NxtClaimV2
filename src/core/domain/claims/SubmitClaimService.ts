@@ -1,4 +1,4 @@
-import { randomInt } from "node:crypto";
+import { randomUUID } from "node:crypto";
 
 import type {
   ClaimDetailType,
@@ -90,7 +90,7 @@ function sanitizeEmployeeId(employeeId: string): string {
 function generateClaimId(employeeId: string): string {
   const datePart = formatClaimDate(new Date());
   const employeePart = sanitizeEmployeeId(employeeId);
-  const suffix = String(randomInt(1, 10000)).padStart(4, "0");
+  const suffix = randomUUID().replace(/-/g, "").slice(0, 10).toUpperCase();
   return `CLAIM-${employeePart}-${datePart}-${suffix}`;
 }
 

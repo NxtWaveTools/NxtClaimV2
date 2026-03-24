@@ -31,7 +31,7 @@ import { ClaimsFilterBar } from "@/modules/claims/ui/claims-filter-bar";
 import { ClaimsTableSkeleton } from "@/modules/claims/ui/claims-table-skeleton";
 import { FinanceApprovalsBulkTable } from "@/modules/claims/ui/finance-approvals-bulk-table";
 import { MyClaimsPaginationControls } from "@/modules/claims/ui/my-claims-pagination-controls";
-import { ApprovalsQuickViewSheet } from "@/modules/claims/ui/approvals-quick-view-sheet";
+import { ApprovalsAuditModeDialog } from "@/modules/claims/ui/approvals-quick-view-sheet";
 import { ClaimSemanticDownloadButton } from "@/modules/claims/ui/claim-semantic-download-button";
 
 const PAGE_SIZE = 10;
@@ -706,7 +706,7 @@ async function ClaimsCommandCenterTable({
                                 compact
                               />
                             ) : null}
-                            <ApprovalsQuickViewSheet
+                            <ApprovalsAuditModeDialog
                               claimId={claim.id}
                               detailType={claim.detailType}
                               submitter={claim.submitter}
@@ -728,7 +728,7 @@ async function ClaimsCommandCenterTable({
                               auditLogs={auditLogsByClaimId[claim.id] ?? []}
                             >
                               {renderActions(false)}
-                            </ApprovalsQuickViewSheet>
+                            </ApprovalsAuditModeDialog>
                             {renderActions(true)}
                           </div>
                         </td>

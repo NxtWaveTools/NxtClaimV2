@@ -4,7 +4,7 @@ import { getAuthStatePathForEmail, registerAuthStateEmail } from "./support/auth
 
 const defaultPassword = "password123";
 const runTag = process.env.E2E_RUN_TAG ?? `E2E-${Date.now()}`;
-const SEMANTIC_CLAIM_ID_REGEX = /^CLAIM-[A-Za-z0-9]+-\d{8}-\d{4}$/;
+const SEMANTIC_CLAIM_ID_REGEX = /^CLAIM-[A-Za-z0-9]+-\d{8}-[A-Za-z0-9]+$/;
 
 const ACTORS = {
   employeeA: {
@@ -421,12 +421,16 @@ async function loginWithEmail(page: Page, email: string): Promise<void> {
 
   await page.goto("/dashboard", { waitUntil: "domcontentloaded" });
   const errorToast = page.locator('[data-sonner-toast][data-type="error"], [role="alert"]').first();
-  if (await errorToast.isVisible()) {
+  const walletHeading = page.getByRole("heading", { name: /wallet summary/i });
+  if (await walletHeading.isVisible().catch(() => false)) {
+    return;
+  }
+
+  if (await errorToast.isVisible().catch(() => false)) {
     throw new Error(await errorToast.innerText());
   }
-  await expect(page.getByRole("heading", { name: /wallet summary/i })).toBeVisible({
-    timeout: 15000,
-  });
+
+  await expect(walletHeading).toBeVisible({ timeout: 15000 });
 }
 
 async function getAmountReceived(page: Page): Promise<number> {

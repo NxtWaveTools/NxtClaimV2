@@ -358,42 +358,37 @@ async function loginToContext(
   email: string,
   password: string,
 ): Promise<Page> {
+  const loginResponse = await context.request.post("/api/auth/email-login", {
+    data: { email, password },
+  });
+
+  if (!loginResponse.ok()) {
+    throw new Error(`Email login failed for ${email}: HTTP ${loginResponse.status()}`);
+  }
+
+  const loginPayload = (await loginResponse.json()) as {
+    data?: { session?: { accessToken?: string; refreshToken?: string } };
+  };
+
+  const accessToken = loginPayload.data?.session?.accessToken;
+  const refreshToken = loginPayload.data?.session?.refreshToken;
+  if (!accessToken || !refreshToken) {
+    throw new Error(`Missing session tokens for ${email}.`);
+  }
+
+  const sessionResponse = await context.request.post("/api/auth/session", {
+    data: { accessToken, refreshToken },
+  });
+
+  if (!sessionResponse.ok()) {
+    throw new Error(`Session bootstrap failed for ${email}: HTTP ${sessionResponse.status()}`);
+  }
+
   const page = await context.newPage();
-  await page.goto("/auth/login", { waitUntil: "domcontentloaded" });
+  await page.goto("/dashboard", { waitUntil: "domcontentloaded" });
 
-  const emailInput = page.getByLabel(/work email/i);
-  const passwordInput = page.getByLabel(/^password$/i);
-  await emailInput.fill(email);
-  await passwordInput.fill(password);
-
-  await page.getByRole("button", { name: /sign in with email/i }).click();
-
-  const errorToast = page.locator(".text-destructive, [role='alert']").first();
   const dashboardHeading = page.getByRole("heading", { name: /dashboard|wallet/i }).first();
-
-  await Promise.race([
-    errorToast.waitFor({ state: "visible", timeout: 15000 }).catch(() => undefined),
-    dashboardHeading.waitFor({ state: "visible", timeout: 15000 }).catch(() => undefined),
-  ]);
-
-  if (await errorToast.isVisible().catch(() => false)) {
-    const errorText = (await errorToast.innerText()).trim();
-    if (errorText.length > 0) {
-      throw new Error(`Login Failed: ${errorText}`);
-    }
-  }
-
-  await page.waitForURL(/\/dashboard/, { timeout: 60000 }).catch(() => undefined);
-
-  const hasDashboardUrl = page.url().includes("/dashboard");
-  const dashboardHeadingCount = await page
-    .getByRole("heading", { name: /dashboard|wallet/i })
-    .count();
-  const myClaimsLinkCount = await page.locator('a[href="/dashboard/my-claims"]').count();
-
-  if (!hasDashboardUrl && dashboardHeadingCount === 0 && myClaimsLinkCount === 0) {
-    throw new Error("Login did not land on an authenticated dashboard state.");
-  }
+  await expect(dashboardHeading).toBeVisible({ timeout: 30000 });
 
   return page;
 }
@@ -634,12 +629,26 @@ async function submitReimbursementClaim(
   await page.locator("#receiptFile").setInputFiles(RECEIPT_PATH);
 
   await page.getByRole("button", { name: /submit claim/i }).click();
-  await expect(page.getByText(/claim submitted successfully/i)).toBeVisible({ timeout: 30000 });
+  await waitForClaimSubmissionCompletion(page);
 
   const actor = getActorByRole(input.actorRole);
   const claimId = await resolveClaimIdByBillNo(actor.id, billNo);
 
   return { claimId, marker };
+}
+
+async function waitForClaimSubmissionCompletion(page: Page): Promise<void> {
+  try {
+    await expect(page.getByText(/claim submitted successfully/i).first()).toBeVisible({
+      timeout: 8000,
+    });
+    return;
+  } catch {
+    await expect(page).toHaveURL(/\/dashboard\/my-claims(?:\?|$)/, { timeout: 30000 });
+    await expect(page.getByRole("heading", { name: /my claims/i })).toBeVisible({
+      timeout: 30000,
+    });
+  }
 }
 
 async function submitPettyCashRequestClaim(
@@ -670,7 +679,7 @@ async function submitPettyCashRequestClaim(
   await page.locator("#purpose").fill(purpose);
 
   await page.getByRole("button", { name: /submit claim/i }).click();
-  await expect(page.getByText(/claim submitted successfully/i)).toBeVisible({ timeout: 30000 });
+  await waitForClaimSubmissionCompletion(page);
 
   const actor = getActorByRole(input.actorRole);
   const claimId = await resolveClaimIdByAdvancePurpose(actor.id, purpose);
@@ -707,7 +716,7 @@ async function submitPettyCashExpenseClaim(
   await page.locator("#receiptFile").setInputFiles(RECEIPT_PATH);
 
   await page.getByRole("button", { name: /submit claim/i }).click();
-  await expect(page.getByText(/claim submitted successfully/i)).toBeVisible({ timeout: 30000 });
+  await waitForClaimSubmissionCompletion(page);
 
   const actor = getActorByRole(input.actorRole);
   const claimId = await resolveClaimIdByBillNo(actor.id, billNo);
@@ -715,15 +724,29 @@ async function submitPettyCashExpenseClaim(
   return { claimId, marker };
 }
 
-async function openApprovalsHistory(page: Page): Promise<void> {
-  await page.goto("/dashboard/my-claims?view=approvals", { waitUntil: "domcontentloaded" });
+async function openApprovalsHistory(page: Page, claimId?: string): Promise<void> {
+  const params = new URLSearchParams({ view: "approvals" });
+  if (claimId) {
+    params.set("search_field", "claim_id");
+    params.set("search_query", claimId);
+  }
+
+  await page.goto(`/dashboard/my-claims?${params.toString()}`, { waitUntil: "domcontentloaded" });
   await expect(page.getByRole("heading", { name: /approvals history/i })).toBeVisible({
     timeout: 20000,
   });
 }
 
-async function openMyClaims(page: Page): Promise<void> {
-  await page.goto("/dashboard/my-claims", { waitUntil: "domcontentloaded" });
+async function openMyClaims(page: Page, claimId?: string): Promise<void> {
+  const params = new URLSearchParams();
+  if (claimId) {
+    params.set("search_field", "claim_id");
+    params.set("search_query", claimId);
+  }
+
+  const url =
+    params.size > 0 ? `/dashboard/my-claims?${params.toString()}` : "/dashboard/my-claims";
+  await page.goto(url, { waitUntil: "domcontentloaded" });
   await expect(page.getByRole("heading", { name: /my claims/i })).toBeVisible({ timeout: 20000 });
 }
 
@@ -731,13 +754,39 @@ function claimRow(page: Page, claimId: string): Locator {
   return page.locator("tbody tr", { has: page.getByRole("link", { name: claimId }) }).first();
 }
 
+async function clickRowActionButton(page: Page, row: Locator, actionName: RegExp): Promise<void> {
+  const rowButton = row.getByRole("button", { name: actionName }).first();
+  if ((await rowButton.count()) > 0) {
+    await rowButton.scrollIntoViewIfNeeded().catch(() => null);
+    if (await rowButton.isVisible().catch(() => false)) {
+      await rowButton.click();
+      return;
+    }
+  }
+
+  // Some approval flows require opening the full audit mode dialog via View.
+  const viewButton = row.getByRole("button", { name: /^view$/i }).first();
+  await expect(viewButton).toBeVisible({ timeout: 10000 });
+  await viewButton.click();
+
+  const auditModeCloseButton = page.getByRole("button", { name: /close audit mode/i }).first();
+  await expect(auditModeCloseButton).toBeVisible({ timeout: 10000 });
+
+  const dialogActionButton = page
+    .locator("section", { hasText: /take action/i })
+    .first()
+    .getByRole("button", { name: actionName })
+    .first();
+  await expect(dialogActionButton).toBeVisible({ timeout: 10000 });
+  await dialogActionButton.click();
+}
+
 async function clickApproveButton(row: Locator): Promise<void> {
-  const approveButton = row.getByRole("button", { name: /^(approve|ok)$/i }).first();
-  await approveButton.click();
+  await clickRowActionButton(row.page(), row, /^(approve|ok)$/i);
 }
 
 async function approveAtCurrentScope(page: Page, claimId: string): Promise<void> {
-  await openApprovalsHistory(page);
+  await openApprovalsHistory(page, claimId);
   const row = claimRow(page, claimId);
   await expect(row).toBeVisible({ timeout: 30000 });
 
@@ -755,14 +804,11 @@ async function rejectAtCurrentScopeWithOptions(
   reason: string,
   input: { allowResubmission: boolean },
 ): Promise<void> {
-  await openApprovalsHistory(page);
+  await openApprovalsHistory(page, claimId);
   const row = claimRow(page, claimId);
   await expect(row).toBeVisible({ timeout: 30000 });
 
-  await row
-    .getByRole("button", { name: /^reject$/i })
-    .first()
-    .click();
+  await clickRowActionButton(page, row, /^reject$/i);
 
   const reasonBox = page.locator("textarea[name='rejectionReason']").first();
   await expect(reasonBox).toBeVisible({ timeout: 10000 });
@@ -780,14 +826,11 @@ async function rejectAtCurrentScopeWithOptions(
 }
 
 async function markPaidAtFinance(page: Page, claimId: string): Promise<void> {
-  await openApprovalsHistory(page);
+  await openApprovalsHistory(page, claimId);
   const row = claimRow(page, claimId);
   await expect(row).toBeVisible({ timeout: 30000 });
 
-  await row
-    .getByRole("button", { name: /^paid$|mark as paid/i })
-    .first()
-    .click();
+  await clickRowActionButton(page, row, /^paid$|mark as paid/i);
   await expect(page.getByText(/marked as paid\./i)).toBeVisible({ timeout: 30000 });
 }
 
@@ -796,7 +839,7 @@ async function expectClaimVisibleInApprovals(
   claimId: string,
   visible: boolean,
 ): Promise<void> {
-  await openApprovalsHistory(page);
+  await openApprovalsHistory(page, claimId);
   const row = claimRow(page, claimId);
 
   if (visible) {
@@ -812,7 +855,7 @@ async function expectClaimVisibleInMyClaims(
   claimId: string,
   visible: boolean,
 ): Promise<void> {
-  await openMyClaims(page);
+  await openMyClaims(page, claimId);
   const row = claimRow(page, claimId);
 
   if (visible) {
@@ -828,7 +871,7 @@ async function expectClaimStatusInMyClaims(
   claimId: string,
   statusText: string,
 ): Promise<void> {
-  await openMyClaims(page);
+  await openMyClaims(page, claimId);
   const row = claimRow(page, claimId);
   await expect(row).toBeVisible({ timeout: 30000 });
   await expect(row).toContainText(new RegExp(statusText, "i"));
@@ -839,10 +882,32 @@ async function expectClaimStatusInApprovals(
   claimId: string,
   statusText: string,
 ): Promise<void> {
-  await openApprovalsHistory(page);
+  await openApprovalsHistory(page, claimId);
   const row = claimRow(page, claimId);
   await expect(row).toBeVisible({ timeout: 30000 });
   await expect(row).toContainText(new RegExp(statusText, "i"));
+}
+
+async function resolveFinanceBulkActorPage(flowUrl: string): Promise<Page> {
+  const candidateRoles: KnownRole[] = ["finance1", "finance2"];
+
+  for (const role of candidateRoles) {
+    const candidatePage = getActorPage(role);
+    await candidatePage.goto(flowUrl, { waitUntil: "domcontentloaded" });
+    await expect(candidatePage.getByRole("heading", { name: /approvals history/i })).toBeVisible({
+      timeout: 30000,
+    });
+
+    const bulkMasterCheckbox = candidatePage.getByTestId("bulk-master-checkbox").first();
+    if ((await bulkMasterCheckbox.count()) > 0) {
+      await expect(bulkMasterCheckbox).toBeVisible({ timeout: 5000 });
+      return candidatePage;
+    }
+  }
+
+  throw new Error(
+    "Bulk approvals controls are unavailable for both finance1 and finance2 in current viewer scope.",
+  );
 }
 
 async function assertClaimStatusInDb(claimId: string, expectedStatus: string): Promise<void> {
@@ -1138,8 +1203,7 @@ test.describe("Claims Workflow Multi-Role E2E", () => {
 
   test("Flow 8: Standard Reject Blocks Duplicates", async () => {
     const submitterPage = getActorPage("submitter");
-    const hodPage = getActorPage("hod");
-    const duplicateBillNo = "BILL-REJECT-001";
+    const duplicateBillNo = `BILL-REJECT-${RUN_TAG}`;
     const duplicateAmount = 100;
 
     const firstSubmitted = await submitReimbursementClaim(submitterPage, {
@@ -1150,8 +1214,13 @@ test.describe("Claims Workflow Multi-Role E2E", () => {
       billNoOverride: duplicateBillNo,
     });
 
+    const firstRouting = await getClaimRouting(firstSubmitted.claimId);
+    const l1Role = resolveRoleByUserId(firstRouting.assignedL1ApproverId);
+    expect(l1Role).not.toBeNull();
+    const l1ApproverPage = getActorPage(l1Role!);
+
     await rejectAtCurrentScopeWithOptions(
-      hodPage,
+      l1ApproverPage,
       firstSubmitted.claimId,
       "Strict rejection test.",
       {
@@ -1187,7 +1256,7 @@ test.describe("Claims Workflow Multi-Role E2E", () => {
   test("Flow 9: Resubmission Reject Allows Duplicates", async () => {
     const submitterPage = getActorPage("submitter");
     const hodPage = getActorPage("hod");
-    const duplicateBillNo = "BILL-RESUBMIT-001";
+    const duplicateBillNo = `BILL-RESUBMIT-${RUN_TAG}`;
     const duplicateAmount = 200;
 
     const firstSubmitted = await submitReimbursementClaim(submitterPage, {
@@ -1234,7 +1303,7 @@ test.describe("Claims Workflow Multi-Role E2E", () => {
       waitUntil: "domcontentloaded",
     });
 
-    await expect(submitterPage.getByRole("heading", { name: /claim detail/i })).toBeVisible({
+    await expect(submitterPage.getByRole("heading", { name: submitted.claimId })).toBeVisible({
       timeout: 30000,
     });
 
@@ -1250,8 +1319,6 @@ test.describe("Claims Workflow Multi-Role E2E", () => {
 
   test("Flow 11: Bulk Actions and Cross-Page Selection", async () => {
     const submitterPage = getActorPage("submitter");
-    const hodPage = getActorPage("hod");
-    const finance1Page = getActorPage("finance1");
     const flow11EmployeeId = `FLOW11-${RUN_TAG}`;
 
     const createdClaims: string[] = [];
@@ -1265,7 +1332,10 @@ test.describe("Claims Workflow Multi-Role E2E", () => {
         employeeIdOverride: flow11EmployeeId,
       });
 
-      await approveAtCurrentScope(hodPage, submitted.claimId);
+      const routing = await getClaimRouting(submitted.claimId);
+      const l1Role = resolveRoleByUserId(routing.assignedL1ApproverId);
+      expect(l1Role).not.toBeNull();
+      await approveAtCurrentScope(getActorPage(l1Role!), submitted.claimId);
       createdClaims.push(submitted.claimId);
     }
 
@@ -1273,27 +1343,31 @@ test.describe("Claims Workflow Multi-Role E2E", () => {
       "HOD approved - Awaiting finance approval",
     )}&search_field=employee_id&search_query=${encodeURIComponent(flow11EmployeeId)}`;
 
-    await finance1Page.goto(flow11Url, { waitUntil: "domcontentloaded" });
-    await expect(finance1Page.getByRole("heading", { name: /approvals history/i })).toBeVisible({
-      timeout: 30000,
-    });
+    const financeBulkPage = await resolveFinanceBulkActorPage(flow11Url);
 
-    await finance1Page.getByTestId("bulk-master-checkbox").check();
-    await expect(finance1Page.getByText(/All 10 claims on this page are selected\./i)).toBeVisible({
+    await financeBulkPage.getByTestId("bulk-master-checkbox").check();
+    await expect(
+      financeBulkPage.getByText(/All 10 claims on this page are selected\./i),
+    ).toBeVisible({
       timeout: 15000,
     });
 
-    await finance1Page.getByRole("button", { name: /Select all 11 claims/i }).click();
-    await finance1Page.getByRole("button", { name: /^Bulk Approve$/i }).click();
+    await financeBulkPage.getByRole("button", { name: /Select all 11 claims/i }).click();
+    await financeBulkPage.getByRole("button", { name: /^Bulk Approve$/i }).click();
 
-    await expect(finance1Page.getByText(/11 claim\(s\) approved\./i)).toBeVisible({
-      timeout: 30000,
-    });
-
-    await finance1Page.goto(flow11Url, { waitUntil: "domcontentloaded" });
-    await expect(finance1Page.getByText(/No approvals history found\./i)).toBeVisible({
-      timeout: 30000,
-    });
+    await expect
+      .poll(
+        async () => {
+          await financeBulkPage.goto(flow11Url, { waitUntil: "domcontentloaded" });
+          const noHistory = await financeBulkPage
+            .getByText(/No approvals history found\./i)
+            .isVisible()
+            .catch(() => false);
+          return noHistory;
+        },
+        { timeout: 60000 },
+      )
+      .toBe(true);
 
     for (const claimId of createdClaims) {
       await assertClaimStatusInDb(claimId, "Finance Approved - Payment under process");

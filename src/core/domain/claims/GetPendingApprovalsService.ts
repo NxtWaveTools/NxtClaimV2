@@ -101,7 +101,8 @@ export class GetPendingApprovalsService {
 
     return {
       canViewApprovals: isL1 || isFinance,
-      activeScope: isL1 ? "l1" : isFinance ? "finance" : null,
+      // Finance scope takes precedence for dual-role users so they can process L2 queues.
+      activeScope: isFinance ? "finance" : isL1 ? "l1" : null,
       errorMessage: null,
     };
   }

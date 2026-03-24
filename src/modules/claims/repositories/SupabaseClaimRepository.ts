@@ -9,6 +9,7 @@ import type {
   ClaimAuditLogRecord,
   ClaimDepartmentApprovers,
   ClaimExportRecord,
+  ClaimFullExportRecord,
   ClaimDropdownOption,
   ClaimPaymentMode,
   ClaimsExportFetchScope,
@@ -243,6 +244,88 @@ type ClaimFinanceEditRow = {
   submitted_by: string;
   expense_details: ClaimFinanceEditExpenseRow | ClaimFinanceEditExpenseRow[] | null;
   advance_details: ClaimFinanceEditAdvanceRow | ClaimFinanceEditAdvanceRow[] | null;
+};
+
+type ExportClaimUserRow = {
+  full_name: string | null;
+  email: string | null;
+};
+
+type ExportClaimLookupRow = {
+  id: string;
+  name: string;
+};
+
+type ExportClaimExpenseRow = {
+  bill_no: string | null;
+  transaction_id: string | null;
+  purpose: string | null;
+  expense_category_id: string | null;
+  product_id: string | null;
+  location_id: string | null;
+  is_gst_applicable: boolean | null;
+  gst_number: string | null;
+  transaction_date: string | null;
+  basic_amount: number | string | null;
+  cgst_amount: number | string | null;
+  sgst_amount: number | string | null;
+  igst_amount: number | string | null;
+  total_amount: number | string | null;
+  currency_code: string | null;
+  vendor_name: string | null;
+  people_involved: string | null;
+  remarks: string | null;
+  receipt_file_path: string | null;
+  bank_statement_file_path: string | null;
+  master_expense_categories: ExportClaimLookupRow | ExportClaimLookupRow[] | null;
+  master_products: ExportClaimLookupRow | ExportClaimLookupRow[] | null;
+  master_locations: ExportClaimLookupRow | ExportClaimLookupRow[] | null;
+};
+
+type ExportClaimAdvanceRow = {
+  requested_amount: number | string | null;
+  budget_month: number | null;
+  budget_year: number | null;
+  expected_usage_date: string | null;
+  purpose: string | null;
+  product_id: string | null;
+  location_id: string | null;
+  remarks: string | null;
+  supporting_document_path: string | null;
+  master_products: ExportClaimLookupRow | ExportClaimLookupRow[] | null;
+  master_locations: ExportClaimLookupRow | ExportClaimLookupRow[] | null;
+};
+
+type ExportClaimRow = {
+  id: string;
+  status: DbClaimStatus;
+  submission_type: "Self" | "On Behalf";
+  detail_type: "expense" | "advance";
+  submitted_by: string;
+  on_behalf_of_id: string | null;
+  employee_id: string;
+  cc_emails: string | null;
+  on_behalf_email: string | null;
+  on_behalf_employee_code: string | null;
+  department_id: string;
+  payment_mode_id: string;
+  assigned_l1_approver_id: string;
+  assigned_l2_approver_id: string | null;
+  submitted_at: string;
+  hod_action_at: string | null;
+  finance_action_at: string | null;
+  rejection_reason: string | null;
+  is_resubmission_allowed: boolean;
+  created_at: string;
+  updated_at: string;
+  submitter_user: ExportClaimUserRow | ExportClaimUserRow[] | null;
+  beneficiary_user: ExportClaimUserRow | ExportClaimUserRow[] | null;
+  l1_approver_user: ExportClaimUserRow | ExportClaimUserRow[] | null;
+  l2_approver_user: ExportClaimUserRow | ExportClaimUserRow[] | null;
+  master_departments: ExportClaimLookupRow | ExportClaimLookupRow[] | null;
+  master_payment_modes: ExportClaimLookupRow | ExportClaimLookupRow[] | null;
+  expense_details: ExportClaimExpenseRow | ExportClaimExpenseRow[] | null;
+  advance_details: ExportClaimAdvanceRow | ExportClaimAdvanceRow[] | null;
 };
 
 function mapOptionRows(rows: ClaimOptionRow[] | null): ClaimDropdownOption[] {
@@ -801,6 +884,10 @@ export class SupabaseClaimRepository implements ClaimRepository {
       return { processedCount: 0, errorMessage: error.message };
     }
 
+    if (data === null || data === undefined) {
+      return { processedCount: input.claimIds.length, errorMessage: null };
+    }
+
     const raw = data as BulkProcessClaimsRpcResponse;
     const parsed = typeof raw === "number" ? raw : typeof raw === "string" ? Number(raw) : 0;
 
@@ -912,11 +999,31 @@ export class SupabaseClaimRepository implements ClaimRepository {
           : null;
 
     if (auditActionType) {
+      let auditAssignedToId: string | null = null;
+
+      if (auditActionType === "L1_APPROVED" && input.assignedL2ApproverId) {
+        const financeApproverLookup = await client
+          .from("master_finance_approvers")
+          .select("user_id")
+          .eq("id", input.assignedL2ApproverId)
+          .eq("is_active", true)
+          .limit(1)
+          .maybeSingle();
+
+        if (financeApproverLookup.error) {
+          return { errorMessage: financeApproverLookup.error.message };
+        }
+
+        const financeApproverUserId =
+          (financeApproverLookup.data as { user_id: string } | null)?.user_id ?? null;
+        auditAssignedToId = financeApproverUserId;
+      }
+
       const auditResult = await this.createClaimAuditLog({
         claimId: input.claimId,
         actorId: input.actorUserId,
         actionType: auditActionType,
-        assignedToId: auditActionType === "L1_APPROVED" ? input.assignedL2ApproverId : null,
+        assignedToId: auditAssignedToId,
         remarks: input.rejectionReason,
       });
 
@@ -1558,6 +1665,23 @@ export class SupabaseClaimRepository implements ClaimRepository {
       return { claimId: null, errorMessage: "Claim creation returned unexpected response." };
     }
 
+    const submittedEmployeeId =
+      typeof payload.employee_id === "string" ? payload.employee_id.trim() : "";
+    if (submittedEmployeeId.length > 0) {
+      const employeeIdPersistResult = await client
+        .from("claims")
+        .update({ employee_id: submittedEmployeeId })
+        .eq("id", data)
+        .eq("is_active", true);
+
+      if (employeeIdPersistResult.error) {
+        return {
+          claimId: null,
+          errorMessage: `Claim created but employee_id persistence failed: ${employeeIdPersistResult.error.message}`,
+        };
+      }
+    }
+
     const actorId = typeof payload.submitted_by === "string" ? payload.submitted_by : null;
     const assignedToId =
       typeof payload.assigned_l1_approver_id === "string" ? payload.assigned_l1_approver_id : null;
@@ -1592,13 +1716,32 @@ export class SupabaseClaimRepository implements ClaimRepository {
     remarks: string | null;
   }): Promise<{ errorMessage: string | null }> {
     const client = getServiceRoleSupabaseClient();
-    const { error } = await client.from("claim_audit_logs").insert({
+    const payload = {
       claim_id: input.claimId,
       actor_id: input.actorId,
       action_type: input.actionType,
       assigned_to_id: input.assignedToId,
       remarks: input.remarks,
-    });
+    };
+
+    const { error } = await client.from("claim_audit_logs").insert(payload);
+
+    if (
+      error &&
+      input.assignedToId &&
+      /claim_audit_logs_assigned_to_id_fkey/i.test(error.message)
+    ) {
+      const fallback = await client.from("claim_audit_logs").insert({
+        ...payload,
+        assigned_to_id: null,
+      });
+
+      if (fallback.error) {
+        return { errorMessage: fallback.error.message };
+      }
+
+      return { errorMessage: null };
+    }
 
     if (error) {
       return { errorMessage: error.message };
@@ -2240,6 +2383,316 @@ export class SupabaseClaimRepository implements ClaimRepository {
         hodActionDate: row.hod_action_date,
         financeActionDate: row.finance_action_date,
       })),
+      errorMessage: null,
+    };
+  }
+
+  async getClaimsForFullExport(input: {
+    userId: string;
+    fetchScope: ClaimsExportFetchScope;
+    filters?: GetMyClaimsFilters;
+    limit: number;
+    offset: number;
+  }): Promise<{ data: ClaimFullExportRecord[]; errorMessage: string | null }> {
+    const client = getServiceRoleSupabaseClient();
+    const normalizedStatuses = normalizeStatusFilter(input.filters?.status);
+    const { fromDate, toDate } = normalizeDateRange(input.filters);
+    const normalizedSearch = normalizeSearchInput(input.filters);
+
+    let financeApproverIds: string[] = [];
+
+    if (input.fetchScope === "finance_approvals") {
+      const financeApproversResult = await client
+        .from("master_finance_approvers")
+        .select("id")
+        .eq("user_id", input.userId)
+        .eq("is_active", true)
+        .limit(1);
+
+      if (financeApproversResult.error) {
+        return {
+          data: [],
+          errorMessage: financeApproversResult.error.message,
+        };
+      }
+
+      financeApproverIds = (financeApproversResult.data ?? []).map((row) => row.id as string);
+
+      if (financeApproverIds.length === 0) {
+        return { data: [], errorMessage: null };
+      }
+    }
+
+    let idsQuery = client
+      .from("vw_enterprise_claims_dashboard")
+      .select("claim_id, created_at")
+      .order("created_at", { ascending: false })
+      .order("claim_id", { ascending: false });
+
+    if (input.fetchScope === "submissions") {
+      idsQuery = idsQuery.or(buildMyClaimsOwnershipOrFilter(input.userId));
+    }
+
+    if (input.fetchScope === "l1_approvals") {
+      idsQuery = idsQuery.eq("assigned_l1_approver_id", input.userId);
+    }
+
+    if (input.fetchScope === "finance_approvals") {
+      const financeNonRejectedStatusesFilter = toPostgrestInList(
+        FINANCE_NON_REJECTED_VISIBLE_STATUSES,
+      );
+
+      idsQuery = idsQuery.or(
+        `status.in.${financeNonRejectedStatusesFilter},and(status.eq.Rejected,assigned_l2_approver_id.not.is.null)`,
+      );
+    }
+
+    idsQuery = applyEnterpriseDashboardFilters({
+      query: idsQuery,
+      filters: input.filters,
+      normalizedStatuses,
+      fromDate,
+      toDate,
+      normalizedSearch,
+    });
+
+    const { data: idData, error: idError } = await idsQuery.range(
+      input.offset,
+      input.offset + input.limit - 1,
+    );
+
+    if (idError) {
+      return {
+        data: [],
+        errorMessage: idError.message,
+      };
+    }
+
+    const orderedClaimIds = (idData ?? []).map((row) =>
+      String((row as { claim_id: string }).claim_id),
+    );
+
+    if (orderedClaimIds.length === 0) {
+      return {
+        data: [],
+        errorMessage: null,
+      };
+    }
+
+    let queryData: unknown[] | null = null;
+    let queryErrorMessage: string | null = null;
+
+    const detailedSelect =
+      "id, status, submission_type, detail_type, submitted_by, on_behalf_of_id, employee_id, cc_emails, on_behalf_email, on_behalf_employee_code, department_id, payment_mode_id, assigned_l1_approver_id, assigned_l2_approver_id, submitted_at, hod_action_at, finance_action_at, rejection_reason, is_resubmission_allowed, created_at, updated_at, submitter_user:users!claims_submitted_by_fkey(full_name, email), beneficiary_user:users!claims_on_behalf_of_id_fkey(full_name, email), l1_approver_user:users!claims_assigned_l1_approver_id_fkey(full_name, email), l2_approver_user:users!claims_assigned_l2_approver_id_fkey(full_name, email), master_departments(id, name), master_payment_modes(id, name), expense_details(bill_no, transaction_id, purpose, expense_category_id, product_id, location_id, is_gst_applicable, gst_number, transaction_date, basic_amount, cgst_amount, sgst_amount, igst_amount, total_amount, currency_code, vendor_name, people_involved, remarks, receipt_file_path, bank_statement_file_path, master_expense_categories(id, name), master_products(id, name), master_locations(id, name)), advance_details(requested_amount, budget_month, budget_year, expected_usage_date, purpose, product_id, location_id, remarks, supporting_document_path, master_products(id, name), master_locations(id, name))";
+
+    const baseSelectWithoutUserRelations =
+      "id, status, submission_type, detail_type, submitted_by, on_behalf_of_id, employee_id, cc_emails, on_behalf_email, on_behalf_employee_code, department_id, payment_mode_id, assigned_l1_approver_id, assigned_l2_approver_id, submitted_at, hod_action_at, finance_action_at, rejection_reason, is_resubmission_allowed, created_at, updated_at, master_departments(id, name), master_payment_modes(id, name), expense_details(bill_no, transaction_id, purpose, expense_category_id, product_id, location_id, is_gst_applicable, gst_number, transaction_date, basic_amount, cgst_amount, sgst_amount, igst_amount, total_amount, currency_code, vendor_name, people_involved, remarks, receipt_file_path, bank_statement_file_path, master_expense_categories(id, name), master_products(id, name), master_locations(id, name)), advance_details(requested_amount, budget_month, budget_year, expected_usage_date, purpose, product_id, location_id, remarks, supporting_document_path, master_products(id, name), master_locations(id, name))";
+
+    const { data: primaryData, error: primaryError } = await client
+      .from("claims")
+      .select(detailedSelect)
+      .in("id", orderedClaimIds)
+      .eq("is_active", true);
+
+    if (primaryError) {
+      const normalizedError = primaryError.message.toLowerCase();
+      const hasUsersRelationCacheError = normalizedError.includes(
+        "relationship between 'claims' and 'users'",
+      );
+
+      if (!hasUsersRelationCacheError) {
+        queryErrorMessage = primaryError.message;
+      } else {
+        const { data: fallbackData, error: fallbackError } = await client
+          .from("claims")
+          .select(baseSelectWithoutUserRelations)
+          .in("id", orderedClaimIds)
+          .eq("is_active", true);
+
+        if (fallbackError) {
+          queryErrorMessage = fallbackError.message;
+        } else {
+          queryData = fallbackData as unknown[];
+        }
+      }
+    } else {
+      queryData = primaryData as unknown[];
+    }
+
+    if (queryErrorMessage) {
+      return {
+        data: [],
+        errorMessage: queryErrorMessage,
+      };
+    }
+
+    const rows = (queryData ?? []).map((row) => {
+      const source = row as Partial<ExportClaimRow>;
+
+      return {
+        ...source,
+        submitter_user: source.submitter_user ?? null,
+        beneficiary_user: source.beneficiary_user ?? null,
+        l1_approver_user: source.l1_approver_user ?? null,
+        l2_approver_user: source.l2_approver_user ?? null,
+      } as ExportClaimRow;
+    });
+
+    const userIds = new Set<string>();
+    for (const row of rows) {
+      userIds.add(row.submitted_by);
+
+      if (row.on_behalf_of_id) {
+        userIds.add(row.on_behalf_of_id);
+      }
+
+      if (row.assigned_l1_approver_id) {
+        userIds.add(row.assigned_l1_approver_id);
+      }
+
+      if (row.assigned_l2_approver_id) {
+        userIds.add(row.assigned_l2_approver_id);
+      }
+    }
+
+    const usersById = new Map<string, ExportClaimUserRow>();
+    if (userIds.size > 0) {
+      const { data: usersData, error: usersError } = await client
+        .from("users")
+        .select("id, full_name, email")
+        .in("id", [...userIds])
+        .eq("is_active", true);
+
+      if (usersError) {
+        return {
+          data: [],
+          errorMessage: usersError.message,
+        };
+      }
+
+      for (const user of (usersData ?? []) as Array<{
+        id: string;
+        full_name: string | null;
+        email: string | null;
+      }>) {
+        usersById.set(user.id, {
+          full_name: user.full_name,
+          email: user.email,
+        });
+      }
+    }
+
+    const rowById = new Map(rows.map((row) => [row.id, row]));
+
+    return {
+      data: orderedClaimIds
+        .map((id) => rowById.get(id))
+        .filter((row): row is ExportClaimRow => Boolean(row))
+        .map((row) => {
+          const submitter =
+            getSingleRelation(row.submitter_user) ?? usersById.get(row.submitted_by) ?? null;
+          const beneficiary =
+            getSingleRelation(row.beneficiary_user) ??
+            (row.on_behalf_of_id ? (usersById.get(row.on_behalf_of_id) ?? null) : null);
+          const l1Approver =
+            getSingleRelation(row.l1_approver_user) ??
+            usersById.get(row.assigned_l1_approver_id) ??
+            null;
+          const l2Approver =
+            getSingleRelation(row.l2_approver_user) ??
+            (row.assigned_l2_approver_id
+              ? (usersById.get(row.assigned_l2_approver_id) ?? null)
+              : null);
+          const department = getSingleRelation(row.master_departments);
+          const paymentMode = getSingleRelation(row.master_payment_modes);
+          const expense = getSingleRelation(row.expense_details);
+          const advance = getSingleRelation(row.advance_details);
+          const expenseCategory = getSingleRelation(expense?.master_expense_categories);
+          const expenseProduct = getSingleRelation(expense?.master_products);
+          const expenseLocation = getSingleRelation(expense?.master_locations);
+          const advanceProduct = getSingleRelation(advance?.master_products);
+          const advanceLocation = getSingleRelation(advance?.master_locations);
+
+          return {
+            claimId: row.id,
+            status: row.status,
+            submissionType: row.submission_type,
+            detailType: row.detail_type,
+            submittedBy: row.submitted_by,
+            onBehalfOfId: row.on_behalf_of_id,
+            employeeId: row.employee_id,
+            ccEmails: row.cc_emails,
+            onBehalfEmail: row.on_behalf_email,
+            onBehalfEmployeeCode: row.on_behalf_employee_code,
+            departmentId: row.department_id,
+            departmentName: department?.name ?? null,
+            paymentModeId: row.payment_mode_id,
+            paymentModeName: paymentMode?.name ?? null,
+            assignedL1ApproverId: row.assigned_l1_approver_id,
+            assignedL2ApproverId: row.assigned_l2_approver_id,
+            submittedAt: row.submitted_at,
+            hodActionAt: row.hod_action_at,
+            financeActionAt: row.finance_action_at,
+            rejectionReason: row.rejection_reason,
+            isResubmissionAllowed: row.is_resubmission_allowed,
+            createdAt: row.created_at,
+            updatedAt: row.updated_at,
+            submitterName: submitter?.full_name ?? null,
+            submitterEmail: submitter?.email ?? null,
+            beneficiaryName: beneficiary?.full_name ?? null,
+            beneficiaryEmail: beneficiary?.email ?? null,
+            l1ApproverName: l1Approver?.full_name ?? null,
+            l1ApproverEmail: l1Approver?.email ?? null,
+            l2ApproverName: l2Approver?.full_name ?? null,
+            l2ApproverEmail: l2Approver?.email ?? null,
+            expenseBillNo: expense?.bill_no ?? null,
+            expenseTransactionId: expense?.transaction_id ?? null,
+            expensePurpose: expense?.purpose ?? null,
+            expenseCategoryId: expense?.expense_category_id ?? null,
+            expenseCategoryName: expenseCategory?.name ?? null,
+            expenseProductId: expense?.product_id ?? null,
+            expenseProductName: expenseProduct?.name ?? null,
+            expenseLocationId: expense?.location_id ?? null,
+            expenseLocationName: expenseLocation?.name ?? null,
+            expenseIsGstApplicable: expense?.is_gst_applicable ?? null,
+            expenseGstNumber: expense?.gst_number ?? null,
+            expenseTransactionDate: expense?.transaction_date ?? null,
+            expenseBasicAmount: toNumber(expense?.basic_amount),
+            expenseCgstAmount: toNumber(expense?.cgst_amount),
+            expenseSgstAmount: toNumber(expense?.sgst_amount),
+            expenseIgstAmount: toNumber(expense?.igst_amount),
+            expenseTotalAmount: toNumber(expense?.total_amount),
+            expenseCurrencyCode: expense?.currency_code ?? null,
+            expenseVendorName: expense?.vendor_name ?? null,
+            expensePeopleInvolved: expense?.people_involved ?? null,
+            expenseRemarks: expense?.remarks ?? null,
+            expenseReceiptFilePath: expense?.receipt_file_path ?? null,
+            expenseBankStatementFilePath: expense?.bank_statement_file_path ?? null,
+            advanceRequestedAmount: toNumber(advance?.requested_amount),
+            advanceBudgetMonth: advance?.budget_month ?? null,
+            advanceBudgetYear: advance?.budget_year ?? null,
+            advanceExpectedUsageDate: advance?.expected_usage_date ?? null,
+            advancePurpose: advance?.purpose ?? null,
+            advanceProductId: advance?.product_id ?? null,
+            advanceProductName: advanceProduct?.name ?? null,
+            advanceLocationId: advance?.location_id ?? null,
+            advanceLocationName: advanceLocation?.name ?? null,
+            advanceRemarks: advance?.remarks ?? null,
+            advanceSupportingDocumentPath: advance?.supporting_document_path ?? null,
+          } satisfies ClaimFullExportRecord;
+        }),
+      errorMessage: null,
+    };
+  }
+
+  async getClaimEvidencePublicUrl(input: {
+    filePath: string;
+  }): Promise<{ data: string | null; errorMessage: string | null }> {
+    const client = getServiceRoleSupabaseClient();
+    const { data } = client.storage.from("claims").getPublicUrl(input.filePath);
+
+    return {
+      data: data.publicUrl ?? null,
       errorMessage: null,
     };
   }

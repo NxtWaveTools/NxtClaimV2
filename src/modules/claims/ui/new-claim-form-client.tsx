@@ -1125,6 +1125,15 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
                       shouldValidate: true,
                     },
                   );
+                  setValue(
+                    "expense.bankStatementFileType",
+                    selectedFile ? selectedFile.type || "application/octet-stream" : null,
+                    {
+                      shouldDirty: true,
+                      shouldTouch: true,
+                      shouldValidate: true,
+                    },
+                  );
                 }}
               />
               <p className="text-xs text-slate-500">
