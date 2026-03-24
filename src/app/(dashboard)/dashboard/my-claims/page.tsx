@@ -28,6 +28,7 @@ import { ClaimRejectWithReasonForm } from "@/modules/claims/ui/claim-reject-with
 import { ClaimStatusBadge } from "@/modules/claims/ui/claim-status-badge";
 import { ClaimsFilterBar } from "@/modules/claims/ui/claims-filter-bar";
 import { ClaimsTableSkeleton } from "@/modules/claims/ui/claims-table-skeleton";
+import { FinanceApprovalsBulkTable } from "@/modules/claims/ui/finance-approvals-bulk-table";
 import { MyClaimsPaginationControls } from "@/modules/claims/ui/my-claims-pagination-controls";
 import { ApprovalsQuickViewSheet } from "@/modules/claims/ui/approvals-quick-view-sheet";
 import { ClaimSemanticDownloadButton } from "@/modules/claims/ui/claim-semantic-download-button";
@@ -415,6 +416,73 @@ async function ClaimsCommandCenterTable({
     });
 
     const rows = approvalsResult.data;
+
+    if (approvalScope === "finance") {
+      const approvalsCountResult = await claimRepository.getFinancePendingApprovalsCount(
+        userId,
+        filters,
+      );
+      const totalCount = approvalsCountResult.errorMessage
+        ? rows.length
+        : approvalsCountResult.count;
+
+      return (
+        <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition-colors dark:border-slate-800 dark:bg-zinc-950">
+          {approvalsResult.errorMessage ? (
+            <div className="px-4 py-6">
+              <p className="rounded-xl bg-rose-50 px-3 py-2 text-sm text-rose-700 dark:bg-rose-950/40 dark:text-rose-200">
+                Unable to load approvals history. {approvalsResult.errorMessage}
+              </p>
+            </div>
+          ) : rows.length === 0 ? (
+            <>
+              <div className="border-b border-slate-200 px-4 py-3 dark:border-slate-800">
+                <h2 className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-700 dark:text-slate-300">
+                  Approvals History
+                </h2>
+              </div>
+              <div className="grid place-items-center px-4 py-14 text-center">
+                <p className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                  No approvals history found.
+                </p>
+                <p className="mt-1 text-xs text-slate-500 dark:text-slate-500">
+                  Claims routed to your approval scope will appear here.
+                </p>
+              </div>
+            </>
+          ) : (
+            <>
+              <FinanceApprovalsBulkTable
+                rows={rows.map((claim) => ({
+                  id: claim.id,
+                  employeeId: claim.employeeId,
+                  submitter: claim.submitter,
+                  departmentName: claim.departmentName,
+                  paymentModeName: claim.paymentModeName,
+                  totalAmount: claim.totalAmount,
+                  status: claim.status,
+                  submittedAt: claim.submittedAt,
+                  hodActionDate: null,
+                  financeActionDate: null,
+                }))}
+                totalCount={totalCount}
+                filters={filters}
+              />
+
+              <MyClaimsPaginationControls
+                hasNextPage={approvalsResult.hasNextPage}
+                hasPreviousPage={Boolean(previousCursorToken)}
+                currentCursor={cursor}
+                nextCursor={approvalsResult.nextCursor}
+                previousCursor={previousCursorToken}
+                searchParams={searchParams}
+              />
+            </>
+          )}
+        </section>
+      );
+    }
+
     const evidenceSignedUrlByClaimId = await resolveApprovalEvidenceUrls(claimRepository, rows);
     const auditLogsByClaimId = await resolveAuditLogsByClaimId(
       claimRepository,

@@ -5,15 +5,18 @@ import { revalidatePath } from "next/cache";
 import { SupabaseServerAuthRepository } from "@/modules/auth/repositories/supabase-server-auth.repository";
 import { logger } from "@/core/infra/logging/logger";
 import { ROUTES } from "@/core/config/route-registry";
+import { DB_CLAIM_STATUSES } from "@/core/constants/statuses";
 import { getServiceRoleSupabaseClient } from "@/core/infra/supabase/server-client";
 import { SubmitClaimService } from "@/core/domain/claims/SubmitClaimService";
 import { ProcessL1ClaimDecisionService } from "@/core/domain/claims/ProcessL1ClaimDecisionService";
 import { ProcessL2ClaimDecisionService } from "@/core/domain/claims/ProcessL2ClaimDecisionService";
+import { BulkProcessClaimsService } from "@/core/domain/claims/BulkProcessClaimsService";
 import { UpdateClaimByFinanceService } from "@/core/domain/claims/UpdateClaimByFinanceService";
 import type {
   ClaimDetailType,
   ClaimDropdownOption,
   FinanceClaimEditPayload,
+  GetMyClaimsFilters,
 } from "@/core/domain/claims/contracts";
 import { GetActiveDepartmentsService } from "@/core/domain/departments/GetActiveDepartmentsService";
 import { SupabaseClaimRepository } from "@/modules/claims/repositories/SupabaseClaimRepository";
@@ -32,6 +35,7 @@ const activeDepartmentsService = new GetActiveDepartmentsService({
 const submitClaimService = new SubmitClaimService({ repository, logger });
 const processL1ClaimDecisionService = new ProcessL1ClaimDecisionService({ repository, logger });
 const processL2ClaimDecisionService = new ProcessL2ClaimDecisionService({ repository, logger });
+const bulkProcessClaimsService = new BulkProcessClaimsService({ repository, logger });
 const updateClaimByFinanceService = new UpdateClaimByFinanceService({ repository, logger });
 
 const expenseModeNames = new Set([
@@ -53,6 +57,30 @@ const claimDecisionSchema = z.object({
 });
 const financeEditClaimIdSchema = z.object({
   claimId: claimIdSchema,
+});
+const bulkFiltersSchema = z
+  .object({
+    paymentModeId: z.string().trim().optional(),
+    departmentId: z.string().trim().optional(),
+    locationId: z.string().trim().optional(),
+    productId: z.string().trim().optional(),
+    expenseCategoryId: z.string().trim().optional(),
+    submissionType: z.enum(["Self", "On Behalf"]).optional(),
+    status: z.array(z.enum(DB_CLAIM_STATUSES)).optional(),
+    dateTarget: z.enum(["submitted", "finance_closed"]).optional(),
+    dateFrom: z.string().trim().optional(),
+    dateTo: z.string().trim().optional(),
+    searchField: z.enum(["claim_id", "employee_name", "employee_id"]).optional(),
+    searchQuery: z.string().trim().optional(),
+  })
+  .optional();
+const bulkActionInputSchema = z.object({
+  claimIds: z.array(claimIdSchema).default([]),
+  isGlobalSelect: z.boolean(),
+  filters: bulkFiltersSchema,
+});
+const bulkRejectInputSchema = bulkActionInputSchema.extend({
+  rejectionReason: z.string().trim().min(5, "Rejection reason is required."),
 });
 
 class DuplicateTransactionError extends Error {
@@ -1062,4 +1090,138 @@ export async function markPaymentDoneAction(input: {
     decision: "mark-paid",
     redirectToApprovalsView: input.redirectToApprovalsView,
   });
+}
+
+export async function bulkApprove(input: {
+  claimIds: string[];
+  isGlobalSelect: boolean;
+  filters?: GetMyClaimsFilters;
+}): Promise<{ ok: boolean; message: string; processedCount: number }> {
+  const parseResult = bulkActionInputSchema.safeParse(input);
+  if (!parseResult.success) {
+    return { ok: false, message: "Invalid bulk approve request.", processedCount: 0 };
+  }
+
+  const currentUserResult = await authRepository.getCurrentUser();
+  if (currentUserResult.errorMessage || !currentUserResult.user?.id) {
+    return {
+      ok: false,
+      message: currentUserResult.errorMessage ?? "Unauthorized session.",
+      processedCount: 0,
+    };
+  }
+
+  const result = await bulkProcessClaimsService.execute({
+    actorUserId: currentUserResult.user.id,
+    action: "L2_APPROVE",
+    claimIds: parseResult.data.claimIds,
+    isGlobalSelect: parseResult.data.isGlobalSelect,
+    filters: parseResult.data.filters,
+  });
+
+  if (!result.ok) {
+    return {
+      ok: false,
+      message: result.errorMessage ?? "Failed to bulk approve claims.",
+      processedCount: 0,
+    };
+  }
+
+  revalidatePath(ROUTES.claims.myClaims);
+
+  return {
+    ok: true,
+    message: `${result.processedCount} claim(s) approved.`,
+    processedCount: result.processedCount,
+  };
+}
+
+export async function bulkReject(input: {
+  claimIds: string[];
+  isGlobalSelect: boolean;
+  filters?: GetMyClaimsFilters;
+  rejectionReason: string;
+}): Promise<{ ok: boolean; message: string; processedCount: number }> {
+  const parseResult = bulkRejectInputSchema.safeParse(input);
+  if (!parseResult.success) {
+    return { ok: false, message: "Invalid bulk reject request.", processedCount: 0 };
+  }
+
+  const currentUserResult = await authRepository.getCurrentUser();
+  if (currentUserResult.errorMessage || !currentUserResult.user?.id) {
+    return {
+      ok: false,
+      message: currentUserResult.errorMessage ?? "Unauthorized session.",
+      processedCount: 0,
+    };
+  }
+
+  const result = await bulkProcessClaimsService.execute({
+    actorUserId: currentUserResult.user.id,
+    action: "L2_REJECT",
+    claimIds: parseResult.data.claimIds,
+    isGlobalSelect: parseResult.data.isGlobalSelect,
+    filters: parseResult.data.filters,
+    reason: parseResult.data.rejectionReason,
+  });
+
+  if (!result.ok) {
+    return {
+      ok: false,
+      message: result.errorMessage ?? "Failed to bulk reject claims.",
+      processedCount: 0,
+    };
+  }
+
+  revalidatePath(ROUTES.claims.myClaims);
+
+  return {
+    ok: true,
+    message: `${result.processedCount} claim(s) rejected.`,
+    processedCount: result.processedCount,
+  };
+}
+
+export async function bulkMarkPaid(input: {
+  claimIds: string[];
+  isGlobalSelect: boolean;
+  filters?: GetMyClaimsFilters;
+}): Promise<{ ok: boolean; message: string; processedCount: number }> {
+  const parseResult = bulkActionInputSchema.safeParse(input);
+  if (!parseResult.success) {
+    return { ok: false, message: "Invalid bulk mark-paid request.", processedCount: 0 };
+  }
+
+  const currentUserResult = await authRepository.getCurrentUser();
+  if (currentUserResult.errorMessage || !currentUserResult.user?.id) {
+    return {
+      ok: false,
+      message: currentUserResult.errorMessage ?? "Unauthorized session.",
+      processedCount: 0,
+    };
+  }
+
+  const result = await bulkProcessClaimsService.execute({
+    actorUserId: currentUserResult.user.id,
+    action: "MARK_PAID",
+    claimIds: parseResult.data.claimIds,
+    isGlobalSelect: parseResult.data.isGlobalSelect,
+    filters: parseResult.data.filters,
+  });
+
+  if (!result.ok) {
+    return {
+      ok: false,
+      message: result.errorMessage ?? "Failed to bulk mark claims as paid.",
+      processedCount: 0,
+    };
+  }
+
+  revalidatePath(ROUTES.claims.myClaims);
+
+  return {
+    ok: true,
+    message: `${result.processedCount} claim(s) marked as paid.`,
+    processedCount: result.processedCount,
+  };
 }

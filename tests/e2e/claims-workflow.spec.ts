@@ -9,6 +9,7 @@ import {
 } from "@playwright/test";
 import { loadEnvConfig } from "@next/env";
 import { createClient } from "@supabase/supabase-js";
+import { getAuthStatePathForEmail, registerAuthStateEmail } from "./support/auth-state";
 
 loadEnvConfig(process.cwd());
 
@@ -382,16 +383,17 @@ async function loginToContext(
     }
   }
 
-  await expect
-    .poll(
-      async () => {
-        const hasDashboardUrl = page.url().includes("/dashboard");
-        const myClaimsLinkCount = await page.locator('a[href="/dashboard/my-claims"]').count();
-        return hasDashboardUrl || myClaimsLinkCount > 0;
-      },
-      { timeout: 60000 },
-    )
-    .toBe(true);
+  await page.waitForURL(/\/dashboard/, { timeout: 60000 }).catch(() => undefined);
+
+  const hasDashboardUrl = page.url().includes("/dashboard");
+  const dashboardHeadingCount = await page
+    .getByRole("heading", { name: /dashboard|wallet/i })
+    .count();
+  const myClaimsLinkCount = await page.locator('a[href="/dashboard/my-claims"]').count();
+
+  if (!hasDashboardUrl && dashboardHeadingCount === 0 && myClaimsLinkCount === 0) {
+    throw new Error("Login did not land on an authenticated dashboard state.");
+  }
 
   return page;
 }
@@ -406,8 +408,29 @@ async function setupActorSessions(browser: Browser, actors: RuntimeActors): Prom
   };
 
   for (const role of Object.keys(roleToUser) as KnownRole[]) {
-    const context = await browser.newContext();
-    const page = await loginToContext(context, roleToUser[role].email, DEFAULT_PASSWORD);
+    const email = roleToUser[role].email;
+    const storageStatePath = getAuthStatePathForEmail(email);
+    const context = await browser.newContext(
+      storageStatePath ? { storageState: storageStatePath } : undefined,
+    );
+    let page: Page;
+
+    try {
+      if (storageStatePath) {
+        page = await context.newPage();
+        await page.goto("/dashboard", { waitUntil: "domcontentloaded" });
+      } else {
+        page = await loginToContext(context, email, DEFAULT_PASSWORD);
+        registerAuthStateEmail(email, role);
+      }
+    } catch (error) {
+      await context.close().catch(() => undefined);
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(
+        `Actor login failed for role ${role} (${roleToUser[role].email}): ${message}`,
+      );
+    }
+
     actorSessions.set(role, {
       role,
       user: roleToUser[role],
@@ -582,12 +605,13 @@ async function submitReimbursementClaim(
     onBehalfOfEmail?: string;
     onBehalfOfEmployeeCode?: string;
     billNoOverride?: string;
+    employeeIdOverride?: string;
   },
 ): Promise<SubmittedClaim> {
   await openNewClaimForm(page);
 
   const marker = newMarker(input.workflowLabel);
-  const employeeCode = `${input.actorRole.toUpperCase()}-${marker}`;
+  const employeeCode = input.employeeIdOverride ?? `${input.actorRole.toUpperCase()}-${marker}`;
   const billNo = input.billNoOverride ?? `BILL-${marker}`;
   const transactionId = `TXN-${marker}`;
 
@@ -1222,6 +1246,58 @@ test.describe("Claims Workflow Multi-Role E2E", () => {
     await expect(auditSection).toBeVisible({ timeout: 30000 });
     await expect(auditSection).toContainText(/claim submitted/i);
     await expect(auditSection).toContainText(runtimeActors.submitter.email);
+  });
+
+  test("Flow 11: Bulk Actions and Cross-Page Selection", async () => {
+    const submitterPage = getActorPage("submitter");
+    const hodPage = getActorPage("hod");
+    const finance1Page = getActorPage("finance1");
+    const flow11EmployeeId = `FLOW11-${RUN_TAG}`;
+
+    const createdClaims: string[] = [];
+
+    for (let index = 1; index <= 11; index += 1) {
+      const submitted = await submitReimbursementClaim(submitterPage, {
+        actorRole: "submitter",
+        departmentName: runtimeActors.submitterDepartment.name,
+        amount: 175 + index,
+        workflowLabel: `FLOW11-BULK-${index}`,
+        employeeIdOverride: flow11EmployeeId,
+      });
+
+      await approveAtCurrentScope(hodPage, submitted.claimId);
+      createdClaims.push(submitted.claimId);
+    }
+
+    const flow11Url = `/dashboard/my-claims?view=approvals&status=${encodeURIComponent(
+      "HOD approved - Awaiting finance approval",
+    )}&search_field=employee_id&search_query=${encodeURIComponent(flow11EmployeeId)}`;
+
+    await finance1Page.goto(flow11Url, { waitUntil: "domcontentloaded" });
+    await expect(finance1Page.getByRole("heading", { name: /approvals history/i })).toBeVisible({
+      timeout: 30000,
+    });
+
+    await finance1Page.getByTestId("bulk-master-checkbox").check();
+    await expect(finance1Page.getByText(/All 10 claims on this page are selected\./i)).toBeVisible({
+      timeout: 15000,
+    });
+
+    await finance1Page.getByRole("button", { name: /Select all 11 claims/i }).click();
+    await finance1Page.getByRole("button", { name: /^Bulk Approve$/i }).click();
+
+    await expect(finance1Page.getByText(/11 claim\(s\) approved\./i)).toBeVisible({
+      timeout: 30000,
+    });
+
+    await finance1Page.goto(flow11Url, { waitUntil: "domcontentloaded" });
+    await expect(finance1Page.getByText(/No approvals history found\./i)).toBeVisible({
+      timeout: 30000,
+    });
+
+    for (const claimId of createdClaims) {
+      await assertClaimStatusInDb(claimId, "Finance Approved - Payment under process");
+    }
   });
 
   test("Edge Workflow A (AI-generated): cross-department routing locks to target L1 approver and isolates original HOD", async () => {

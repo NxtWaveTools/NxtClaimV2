@@ -227,6 +227,8 @@ type FinanceApproverSelectionRow = {
   created_at: string;
 };
 
+type BulkProcessClaimsRpcResponse = number | string | null;
+
 type ClaimFinanceEditExpenseRow = {
   receipt_file_path: string | null;
 };
@@ -668,6 +670,148 @@ export class SupabaseClaimRepository implements ClaimRepository {
 
     const row = data as FinanceApproverSelectionRow;
     return { data: row.id, errorMessage: null };
+  }
+
+  async getFinancePendingApprovalsCount(
+    userId: string,
+    filters?: GetMyClaimsFilters,
+  ): Promise<{ count: number; errorMessage: string | null }> {
+    const client = getServiceRoleSupabaseClient();
+    const normalizedStatuses = normalizeStatusFilter(filters?.status);
+    const { fromDate, toDate } = normalizeDateRange(filters);
+    const normalizedSearch = normalizeSearchInput(filters);
+
+    const financeApproversResult = await client
+      .from("master_finance_approvers")
+      .select("id")
+      .eq("user_id", userId)
+      .eq("is_active", true)
+      .limit(1);
+
+    if (financeApproversResult.error) {
+      return { count: 0, errorMessage: financeApproversResult.error.message };
+    }
+
+    if ((financeApproversResult.data ?? []).length === 0) {
+      return { count: 0, errorMessage: null };
+    }
+
+    const financeNonRejectedStatusesFilter = toPostgrestInList(
+      FINANCE_NON_REJECTED_VISIBLE_STATUSES,
+    );
+
+    let query = client
+      .from("vw_enterprise_claims_dashboard")
+      .select("claim_id", { count: "exact", head: true })
+      .or(
+        `status.in.${financeNonRejectedStatusesFilter},and(status.eq.Rejected,assigned_l2_approver_id.not.is.null)`,
+      );
+
+    query = applyEnterpriseDashboardFilters({
+      query,
+      filters,
+      normalizedStatuses,
+      fromDate,
+      toDate,
+      normalizedSearch,
+    });
+
+    const { count, error } = await query;
+
+    if (error) {
+      return { count: 0, errorMessage: error.message };
+    }
+
+    return { count: count ?? 0, errorMessage: null };
+  }
+
+  async listFinancePendingApprovalIds(
+    userId: string,
+    filters?: GetMyClaimsFilters,
+  ): Promise<{ data: string[]; errorMessage: string | null }> {
+    const client = getServiceRoleSupabaseClient();
+    const normalizedStatuses = normalizeStatusFilter(filters?.status);
+    const { fromDate, toDate } = normalizeDateRange(filters);
+    const normalizedSearch = normalizeSearchInput(filters);
+
+    const financeApproversResult = await client
+      .from("master_finance_approvers")
+      .select("id")
+      .eq("user_id", userId)
+      .eq("is_active", true)
+      .limit(1);
+
+    if (financeApproversResult.error) {
+      return { data: [], errorMessage: financeApproversResult.error.message };
+    }
+
+    if ((financeApproversResult.data ?? []).length === 0) {
+      return { data: [], errorMessage: null };
+    }
+
+    const financeNonRejectedStatusesFilter = toPostgrestInList(
+      FINANCE_NON_REJECTED_VISIBLE_STATUSES,
+    );
+
+    let query = client
+      .from("vw_enterprise_claims_dashboard")
+      .select("claim_id")
+      .or(
+        `status.in.${financeNonRejectedStatusesFilter},and(status.eq.Rejected,assigned_l2_approver_id.not.is.null)`,
+      )
+      .order("created_at", { ascending: false })
+      .order("claim_id", { ascending: false });
+
+    query = applyEnterpriseDashboardFilters({
+      query,
+      filters,
+      normalizedStatuses,
+      fromDate,
+      toDate,
+      normalizedSearch,
+    });
+
+    const { data, error } = await query;
+
+    if (error) {
+      return { data: [], errorMessage: error.message };
+    }
+
+    return {
+      data: (data ?? []).map((row) => row.claim_id as string).filter((id) => id.length > 0),
+      errorMessage: null,
+    };
+  }
+
+  async bulkProcessClaims(input: {
+    claimIds: string[];
+    action: "L2_APPROVE" | "L2_REJECT" | "MARK_PAID";
+    actorUserId: string;
+    reason?: string;
+  }): Promise<{ processedCount: number; errorMessage: string | null }> {
+    const client = getServiceRoleSupabaseClient();
+    const { data, error } = await client.rpc("bulk_process_claims", {
+      p_claim_ids: input.claimIds,
+      p_action: input.action,
+      p_actor_id: input.actorUserId,
+      p_reason: input.reason ?? null,
+    });
+
+    if (error) {
+      return { processedCount: 0, errorMessage: error.message };
+    }
+
+    const raw = data as BulkProcessClaimsRpcResponse;
+    const parsed = typeof raw === "number" ? raw : typeof raw === "string" ? Number(raw) : 0;
+
+    if (!Number.isFinite(parsed)) {
+      return {
+        processedCount: 0,
+        errorMessage: "Bulk claim process RPC returned an invalid response.",
+      };
+    }
+
+    return { processedCount: parsed, errorMessage: null };
   }
 
   async getClaimForL1Decision(claimId: string): Promise<{

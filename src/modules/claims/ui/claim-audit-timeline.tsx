@@ -39,6 +39,10 @@ function describeAction(actionType: ClaimAuditLogRecord["actionType"]): string {
     return "Approved by Finance";
   }
 
+  if (actionType === "L2_MARK_PAID") {
+    return "Marked as Paid by Finance";
+  }
+
   return "Rejected by Finance";
 }
 

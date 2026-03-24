@@ -48,6 +48,7 @@ node_modules/
 /blob-report/
 /playwright/.cache/
 /playwright/.auth/
+/.auth/
 
 # DLP hardening (secrets, local config, key material)
 .env

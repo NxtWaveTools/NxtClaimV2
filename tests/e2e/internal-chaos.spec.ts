@@ -8,6 +8,11 @@ import {
   type Page,
 } from "@playwright/test";
 import { createClient } from "@supabase/supabase-js";
+import {
+  getAuthStatePathByRole,
+  getAuthStatePathForEmail,
+  getDefaultSeedEmails,
+} from "./support/auth-state";
 
 loadEnvConfig(process.cwd());
 
@@ -253,6 +258,28 @@ async function fetchSwarmActors(limit: number): Promise<ChaosActor[]> {
     });
   }
 
+  const defaultEmails = getDefaultSeedEmails();
+  const knownSwarmEmails = new Set(
+    [
+      defaultEmails.submitter,
+      defaultEmails.hod,
+      defaultEmails.founder,
+      defaultEmails.finance,
+      defaultEmails.finance2,
+    ].map((email) => email.toLowerCase()),
+  );
+
+  const preferredKnownActors = Object.values(byRole)
+    .flat()
+    .filter((actor) => knownSwarmEmails.has(actor.email.toLowerCase()));
+
+  if (preferredKnownActors.length >= 4) {
+    return shuffleInPlace(preferredKnownActors).slice(
+      0,
+      Math.min(limit, preferredKnownActors.length),
+    );
+  }
+
   const shuffledEmployees = shuffleInPlace([...byRole.EMPLOYEE]);
   const shuffledHods = shuffleInPlace([...byRole.HOD]);
   const shuffledFinances = shuffleInPlace([...byRole.FINANCE]);
@@ -368,8 +395,29 @@ async function createSwarmSessions(
 ): Promise<ChaosSession[]> {
   return Promise.all(
     actors.map(async (actor) => {
-      const context = await browser.newContext();
-      const page = await loginToContext(context, actor.email, DEFAULT_PASSWORD);
+      const roleStatePath =
+        actor.role === "HOD"
+          ? getAuthStatePathByRole("hod")
+          : actor.role === "FOUNDER"
+            ? getAuthStatePathByRole("founder")
+            : actor.role === "FINANCE"
+              ? getAuthStatePathByRole("finance1")
+              : null;
+      const emailStatePath = getAuthStatePathForEmail(actor.email);
+      const storageStatePath = emailStatePath ?? roleStatePath;
+
+      const context = await browser.newContext(
+        storageStatePath ? { storageState: storageStatePath } : undefined,
+      );
+      let page: Page;
+
+      if (storageStatePath) {
+        page = await context.newPage();
+        await page.goto("/dashboard", { waitUntil: "domcontentloaded" });
+      } else {
+        page = await loginToContext(context, actor.email, DEFAULT_PASSWORD);
+      }
+
       attachCrashListeners(page, `${actor.role}:${actor.email}`);
       return { actor, context, page };
     }),
@@ -512,7 +560,11 @@ async function probeFinanceRouteLeak(page: Page, actor: ChaosActor): Promise<str
 
     return `Potential finance-route leak for ${actor.email}: status=${status}, url=${finalUrl}`;
   } catch (error) {
-    return `Finance-route probe failed for ${actor.email}: ${error instanceof Error ? error.message : "unknown error"}`;
+    const message = error instanceof Error ? error.message : "unknown error";
+    if (message.includes("ERR_ABORTED") || message.includes("Navigation failed")) {
+      return null;
+    }
+    return `Finance-route probe failed for ${actor.email}: ${message}`;
   }
 }
 

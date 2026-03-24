@@ -192,7 +192,8 @@ export type ClaimAuditActionType =
   | "L1_APPROVED"
   | "L1_REJECTED"
   | "L2_APPROVED"
-  | "L2_REJECTED";
+  | "L2_REJECTED"
+  | "L2_MARK_PAID";
 
 export type ClaimAuditLogRecord = {
   id: string;
