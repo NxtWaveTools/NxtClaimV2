@@ -281,7 +281,7 @@ export function FinanceApprovalsBulkTable({
               const result = await rejectClaimAction({
                 claimId,
                 rejectionReason,
-                allowResubmission: false,
+                allowResubmission,
               });
 
               if (!result.ok) {

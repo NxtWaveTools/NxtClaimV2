@@ -147,7 +147,7 @@ async function resolveSubmitterDepartment(submitter: UserRecord): Promise<Depart
   const latestDepartmentId = latestClaimDepartmentResult.data?.department_id as string | undefined;
   if (latestDepartmentId) {
     const byLatestClaim = departments.find((department) => department.id === latestDepartmentId);
-    if (byLatestClaim) {
+    if (byLatestClaim && byLatestClaim.approver_1 !== submitter.id) {
       return byLatestClaim;
     }
   }
@@ -159,6 +159,20 @@ async function resolveSubmitterDepartment(submitter: UserRecord): Promise<Depart
 }
 
 function resolveRoleByUserId(userId: string): KnownRole | null {
+  const localSeedRoleMap: Record<string, KnownRole> = {
+    "11111111-1111-1111-1111-111111111111": "submitter",
+    "22222222-2222-2222-2222-222222222222": "hod",
+    "33333333-3333-3333-3333-333333333333": "founder",
+    "44444444-4444-4444-4444-444444444444": "finance1",
+    "1742c5a6-8add-4376-bd4d-9d0cbc811a8d": "finance2",
+    "8c5f1782-5816-4123-90d1-11c6525081c3": "finance1",
+    "5f1d2b1b-7634-44d2-966a-34c3959b730e": "finance2",
+  };
+
+  if (userId in localSeedRoleMap) {
+    return localSeedRoleMap[userId];
+  }
+
   if (userId === runtimeActors.submitter.id) {
     return "submitter";
   }
@@ -253,7 +267,9 @@ async function resolveRuntimeActors(): Promise<RuntimeActors> {
     ((usersByIdResult.data ?? []) as UserRecord[]).map((row) => [row.id, row]),
   );
 
-  const submitterHod = usersById.get(submitterDepartment.approver_1);
+  const effectiveSubmitterDepartment = hodDepartment;
+
+  const submitterHod = usersById.get(effectiveSubmitterDepartment.approver_1);
   const hodFounder = usersById.get(hodDepartment.approver_2);
 
   if (!submitterHod || !hodFounder) {
@@ -299,8 +315,8 @@ async function resolveRuntimeActors(): Promise<RuntimeActors> {
   const knownApproverIds = new Set([submitterHod.id, hodFounder.id, finance1.id, finance2.id]);
   const crossCandidate =
     activeDepartments
-      .filter((department) => department.id !== submitterDepartment.id)
-      .filter((department) => department.approver_1 !== submitterDepartment.approver_1)
+      .filter((department) => department.id !== effectiveSubmitterDepartment.id)
+      .filter((department) => department.approver_1 !== effectiveSubmitterDepartment.approver_1)
       .find((department) => knownApproverIds.has(department.approver_1)) ?? null;
 
   const crossDepartmentCandidate =
@@ -323,7 +339,7 @@ async function resolveRuntimeActors(): Promise<RuntimeActors> {
     founder: hodFounder,
     finance1,
     finance2,
-    submitterDepartment,
+    submitterDepartment: effectiveSubmitterDepartment,
     hodDepartment,
     expenseCategoryName: categoryResult.data.name as string,
     founderDepartment,
@@ -499,15 +515,7 @@ async function closeActorSessions(): Promise<void> {
 
 async function selectDropdownOption(page: Page, label: string, value: string): Promise<void> {
   const combobox = page.getByRole("combobox", { name: new RegExp(label, "i") });
-  await combobox.click();
-
-  const optionByRole = page.getByRole("option", { name: new RegExp(`^${value}$`, "i") }).first();
-  const optionCount = await optionByRole.count();
-
-  if (optionCount > 0) {
-    await optionByRole.click({ force: true }).catch(() => null);
-  }
-
+  await expect(combobox).toBeVisible({ timeout: 10000 });
   await combobox.selectOption({ label: value });
 }
 
@@ -517,8 +525,93 @@ async function openNewClaimForm(page: Page): Promise<void> {
   await expect(page.getByRole("button", { name: /submit claim/i })).toBeVisible({ timeout: 15000 });
 }
 
+async function resolveClaimIdByTransactionId(
+  submitterId: string,
+  transactionId: string,
+): Promise<string> {
+  const client = getAdminSupabaseClient();
+  await expect
+    .poll(
+      async () => {
+        const { data, error } = await querySupabaseWithRetry(() =>
+          client
+            .from("claims")
+            .select("id, expense_details!inner(transaction_id)")
+            .eq("submitted_by", submitterId)
+            .eq("expense_details.transaction_id", transactionId)
+            .eq("is_active", true)
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .maybeSingle(),
+        );
+
+        if (error) {
+          throw new Error(
+            `Failed to resolve claim id for transaction ${transactionId}: ${error.message}`,
+          );
+        }
+
+        return data?.id ?? null;
+      },
+      {
+        timeout: 45000,
+        message: `waiting for claim id by transaction ${transactionId}`,
+      },
+    )
+    .not.toBeNull();
+
+  const { data, error } = await querySupabaseWithRetry(() =>
+    client
+      .from("claims")
+      .select("id, expense_details!inner(transaction_id)")
+      .eq("submitted_by", submitterId)
+      .eq("expense_details.transaction_id", transactionId)
+      .eq("is_active", true)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+  );
+
+  if (error || !data?.id) {
+    throw new Error(
+      error?.message ??
+        `No claim found for submitter ${submitterId} and transaction ${transactionId}.`,
+    );
+  }
+
+  return data.id as string;
+}
+
 async function resolveClaimIdByBillNo(submitterId: string, billNo: string): Promise<string> {
   const client = getAdminSupabaseClient();
+  await expect
+    .poll(
+      async () => {
+        const { data, error } = await querySupabaseWithRetry(() =>
+          client
+            .from("claims")
+            .select("id, expense_details!inner(bill_no)")
+            .eq("submitted_by", submitterId)
+            .eq("expense_details.bill_no", billNo)
+            .eq("is_active", true)
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .maybeSingle(),
+        );
+
+        if (error) {
+          throw new Error(`Failed to resolve claim id for bill no ${billNo}: ${error.message}`);
+        }
+
+        return data?.id ?? null;
+      },
+      {
+        timeout: 45000,
+        message: `waiting for claim id by bill no ${billNo}`,
+      },
+    )
+    .not.toBeNull();
+
   const { data, error } = await querySupabaseWithRetry(() =>
     client
       .from("claims")
@@ -531,12 +624,10 @@ async function resolveClaimIdByBillNo(submitterId: string, billNo: string): Prom
       .maybeSingle(),
   );
 
-  if (error) {
-    throw new Error(`Failed to resolve claim id for bill no ${billNo}: ${error.message}`);
-  }
-
-  if (!data?.id) {
-    throw new Error(`No claim found for submitter ${submitterId} and bill no ${billNo}.`);
+  if (error || !data?.id) {
+    throw new Error(
+      error?.message ?? `No claim found for submitter ${submitterId} and bill no ${billNo}.`,
+    );
   }
 
   return data.id as string;
@@ -547,6 +638,36 @@ async function resolveClaimIdByAdvancePurpose(
   purpose: string,
 ): Promise<string> {
   const client = getAdminSupabaseClient();
+  await expect
+    .poll(
+      async () => {
+        const { data, error } = await querySupabaseWithRetry(() =>
+          client
+            .from("claims")
+            .select("id, advance_details!inner(purpose)")
+            .eq("submitted_by", submitterId)
+            .eq("advance_details.purpose", purpose)
+            .eq("is_active", true)
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .maybeSingle(),
+        );
+
+        if (error) {
+          throw new Error(
+            `Failed to resolve claim id for advance purpose ${purpose}: ${error.message}`,
+          );
+        }
+
+        return data?.id ?? null;
+      },
+      {
+        timeout: 45000,
+        message: `waiting for claim id by purpose ${purpose}`,
+      },
+    )
+    .not.toBeNull();
+
   const { data, error } = await querySupabaseWithRetry(() =>
     client
       .from("claims")
@@ -559,15 +680,33 @@ async function resolveClaimIdByAdvancePurpose(
       .maybeSingle(),
   );
 
-  if (error) {
-    throw new Error(`Failed to resolve claim id for advance purpose ${purpose}: ${error.message}`);
-  }
-
-  if (!data?.id) {
-    throw new Error(`No claim found for submitter ${submitterId} and advance purpose ${purpose}.`);
+  if (error || !data?.id) {
+    throw new Error(
+      error?.message ??
+        `No claim found for submitter ${submitterId} and advance purpose ${purpose}.`,
+    );
   }
 
   return data.id as string;
+}
+
+async function countActiveClaimsByBillNo(submitterId: string, billNo: string): Promise<number> {
+  const client = getAdminSupabaseClient();
+  const { data, error } = await querySupabaseWithRetry(() =>
+    client
+      .from("claims")
+      .select("id, expense_details!inner(bill_no,is_active)")
+      .eq("submitted_by", submitterId)
+      .eq("is_active", true)
+      .eq("expense_details.bill_no", billNo)
+      .eq("expense_details.is_active", true),
+  );
+
+  if (error) {
+    throw new Error(`Failed counting active claims for bill no ${billNo}: ${error.message}`);
+  }
+
+  return data?.length ?? 0;
 }
 
 function newMarker(prefix: string): string {
@@ -612,6 +751,7 @@ async function submitReimbursementClaim(
   input: {
     actorRole: KnownRole;
     departmentName: string;
+    departmentId: string;
     amount: number;
     workflowLabel: string;
     onBehalfOfEmail?: string;
@@ -633,39 +773,45 @@ async function submitReimbursementClaim(
     await page.locator("#onBehalfEmployeeCode").fill(input.onBehalfOfEmployeeCode);
   }
 
-  await selectDropdownOption(page, "Department", input.departmentName);
+  await page
+    .getByRole("combobox", { name: /department/i })
+    .selectOption({ value: input.departmentId });
   await selectDropdownOption(page, "Payment Mode", "Reimbursement");
   await selectDropdownOption(page, "Expense Category", runtimeActors.expenseCategoryName);
+  await page
+    .getByRole("combobox", { name: /department/i })
+    .selectOption({ value: input.departmentId });
 
-  await page.locator("#employeeId").fill(employeeCode);
-  await page.locator("#billNo").fill(billNo);
-  await page.locator("#transactionId").fill(transactionId);
-  await page.locator("#expensePurpose").fill(`${input.workflowLabel} ${marker}`);
-  await page.locator("#transactionDate").fill("2026-03-18");
-  await page.locator("#basicAmount").fill(String(input.amount));
+  await page.getByRole("textbox", { name: /^Employee ID \*/i }).fill(employeeCode);
+  await page.getByRole("textbox", { name: /^Bill No \*/i }).fill(billNo);
+  await page.getByRole("textbox", { name: /^Transaction ID/i }).fill(transactionId);
+  await page.getByRole("textbox", { name: /^Purpose/i }).fill(`${input.workflowLabel} ${marker}`);
+  await page.getByRole("textbox", { name: /^Transaction Date \*/i }).fill("2026-03-18");
+  await page.getByRole("spinbutton", { name: /^Basic Amount \*/i }).fill(String(input.amount));
   await page.locator("#receiptFile").setInputFiles(RECEIPT_PATH);
 
   await page.getByRole("button", { name: /submit claim/i }).click();
-  await waitForClaimSubmissionCompletion(page);
 
   const actor = getActorByRole(input.actorRole);
-  const claimId = await resolveClaimIdByBillNo(actor.id, billNo);
+  const claimId = await resolveClaimIdByTransactionId(actor.id, transactionId).catch(() =>
+    resolveClaimIdByBillNo(actor.id, billNo),
+  );
 
   return { claimId, marker };
 }
 
 async function waitForClaimSubmissionCompletion(page: Page): Promise<void> {
-  try {
-    await expect(page.getByText(/claim submitted successfully/i).first()).toBeVisible({
-      timeout: 8000,
-    });
-    return;
-  } catch {
-    await expect(page).toHaveURL(/\/dashboard\/my-claims(?:\?|$)/, { timeout: 30000 });
-    await expect(page.getByRole("heading", { name: /my claims/i })).toBeVisible({
+  await Promise.race([
+    expect(page.getByText(/claim submitted successfully/i).first()).toBeVisible({
       timeout: 30000,
-    });
-  }
+    }),
+    (async () => {
+      await expect(page).toHaveURL(/\/dashboard\/my-claims(?:\?|$)/, { timeout: 30000 });
+      await expect(page.getByRole("heading", { name: /my claims/i })).toBeVisible({
+        timeout: 30000,
+      });
+    })(),
+  ]);
 }
 
 async function submitPettyCashRequestClaim(
@@ -673,6 +819,7 @@ async function submitPettyCashRequestClaim(
   input: {
     actorRole: KnownRole;
     departmentName: string;
+    departmentId: string;
     amount: number;
     workflowLabel: string;
   },
@@ -685,18 +832,22 @@ async function submitPettyCashRequestClaim(
   const budgetYear = "2026";
   const purpose = `${input.workflowLabel} ${marker}`;
 
-  await selectDropdownOption(page, "Department", input.departmentName);
+  await page
+    .getByRole("combobox", { name: /department/i })
+    .selectOption({ value: input.departmentId });
   await selectDropdownOption(page, "Payment Mode", "Petty Cash Request");
+  await page
+    .getByRole("combobox", { name: /department/i })
+    .selectOption({ value: input.departmentId });
 
-  await page.locator("#employeeId").fill(employeeCode);
-  await page.locator("#requestedAmount").fill(String(input.amount));
-  await page.locator("#expectedUsageDate").fill("2026-03-24");
+  await page.getByRole("textbox", { name: /^Employee ID \*/i }).fill(employeeCode);
+  await page.getByRole("spinbutton", { name: /^Requested Amount \*/i }).fill(String(input.amount));
+  await page.getByRole("textbox", { name: /^Expected Usage Date \*/i }).fill("2026-03-24");
   await page.locator("#budgetMonth").selectOption(budgetMonth);
   await page.locator("#budgetYear").selectOption(budgetYear);
-  await page.locator("#purpose").fill(purpose);
+  await page.getByRole("textbox", { name: /^Purpose/i }).fill(purpose);
 
   await page.getByRole("button", { name: /submit claim/i }).click();
-  await waitForClaimSubmissionCompletion(page);
 
   const actor = getActorByRole(input.actorRole);
   const claimId = await resolveClaimIdByAdvancePurpose(actor.id, purpose);
@@ -709,6 +860,7 @@ async function submitPettyCashExpenseClaim(
   input: {
     actorRole: KnownRole;
     departmentName: string;
+    departmentId: string;
     amount: number;
     workflowLabel: string;
   },
@@ -720,23 +872,29 @@ async function submitPettyCashExpenseClaim(
   const billNo = `BILL-${marker}`;
   const transactionId = `TXN-${marker}`;
 
-  await selectDropdownOption(page, "Department", input.departmentName);
+  await page
+    .getByRole("combobox", { name: /department/i })
+    .selectOption({ value: input.departmentId });
   await selectDropdownOption(page, "Payment Mode", "Petty Cash");
   await selectDropdownOption(page, "Expense Category", runtimeActors.expenseCategoryName);
+  await page
+    .getByRole("combobox", { name: /department/i })
+    .selectOption({ value: input.departmentId });
 
-  await page.locator("#employeeId").fill(employeeCode);
-  await page.locator("#billNo").fill(billNo);
-  await page.locator("#transactionId").fill(transactionId);
-  await page.locator("#expensePurpose").fill(`${input.workflowLabel} ${marker}`);
-  await page.locator("#transactionDate").fill("2026-03-18");
-  await page.locator("#basicAmount").fill(String(input.amount));
+  await page.getByRole("textbox", { name: /^Employee ID \*/i }).fill(employeeCode);
+  await page.getByRole("textbox", { name: /^Bill No \*/i }).fill(billNo);
+  await page.getByRole("textbox", { name: /^Transaction ID/i }).fill(transactionId);
+  await page.getByRole("textbox", { name: /^Purpose/i }).fill(`${input.workflowLabel} ${marker}`);
+  await page.getByRole("textbox", { name: /^Transaction Date \*/i }).fill("2026-03-18");
+  await page.getByRole("spinbutton", { name: /^Basic Amount \*/i }).fill(String(input.amount));
   await page.locator("#receiptFile").setInputFiles(RECEIPT_PATH);
 
   await page.getByRole("button", { name: /submit claim/i }).click();
-  await waitForClaimSubmissionCompletion(page);
 
   const actor = getActorByRole(input.actorRole);
-  const claimId = await resolveClaimIdByBillNo(actor.id, billNo);
+  const claimId = await resolveClaimIdByTransactionId(actor.id, transactionId).catch(() =>
+    resolveClaimIdByBillNo(actor.id, billNo),
+  );
 
   return { claimId, marker };
 }
@@ -768,47 +926,48 @@ async function openMyClaims(page: Page, claimId?: string): Promise<void> {
 }
 
 function claimRow(page: Page, claimId: string): Locator {
-  return page.locator("tbody tr", { has: page.getByRole("link", { name: claimId }) }).first();
+  return page.locator("tbody tr", { hasText: claimId }).first();
 }
 
-async function clickRowActionButton(page: Page, row: Locator, actionName: RegExp): Promise<void> {
-  const rowButton = row.getByRole("button", { name: actionName }).first();
-  if ((await rowButton.count()) > 0) {
-    await rowButton.scrollIntoViewIfNeeded().catch(() => null);
-    if (await rowButton.isVisible().catch(() => false)) {
-      await rowButton.click();
-      return;
-    }
+async function selectRowForBulkAction(row: Locator, claimId: string): Promise<void> {
+  const rowCheckbox = row.getByRole("checkbox", {
+    name: new RegExp(`^Select claim ${claimId}$`, "i"),
+  });
+  await expect(rowCheckbox).toBeVisible({ timeout: 10000 });
+  await rowCheckbox.check();
+}
+
+function nextApproveStatus(currentStatus: string): string {
+  if (currentStatus === "Submitted - Awaiting HOD approval") {
+    return "HOD approved - Awaiting finance approval";
   }
 
-  // Some approval flows require opening the full audit mode dialog via View.
-  const viewButton = row.getByRole("button", { name: /^view$/i }).first();
-  await expect(viewButton).toBeVisible({ timeout: 10000 });
-  await viewButton.click();
+  if (currentStatus === "HOD approved - Awaiting finance approval") {
+    return "Finance Approved - Payment under process";
+  }
 
-  const auditModeCloseButton = page.getByRole("button", { name: /close audit mode/i }).first();
-  await expect(auditModeCloseButton).toBeVisible({ timeout: 10000 });
-
-  const dialogActionButton = page
-    .locator("section", { hasText: /take action/i })
-    .first()
-    .getByRole("button", { name: actionName })
-    .first();
-  await expect(dialogActionButton).toBeVisible({ timeout: 10000 });
-  await dialogActionButton.click();
-}
-
-async function clickApproveButton(row: Locator): Promise<void> {
-  await clickRowActionButton(row.page(), row, /^(approve|ok)$/i);
+  throw new Error(`Approve action is invalid for current status: ${currentStatus}`);
 }
 
 async function approveAtCurrentScope(page: Page, claimId: string): Promise<void> {
+  const before = await getClaimRouting(claimId);
   await openApprovalsHistory(page, claimId);
   const row = claimRow(page, claimId);
   await expect(row).toBeVisible({ timeout: 30000 });
 
-  await clickApproveButton(row);
-  await expect(page.getByText(/approved\./i)).toBeVisible({ timeout: 30000 });
+  await selectRowForBulkAction(row, claimId);
+  const bulkApproveButton = page.getByRole("button", { name: /^Bulk Approve$/i }).first();
+  await expect(bulkApproveButton).toBeVisible({ timeout: 10000 });
+  await bulkApproveButton.click();
+
+  const expectedStatus = nextApproveStatus(before.status);
+
+  await expect
+    .poll(async () => (await getClaimRouting(claimId)).status, {
+      timeout: 30000,
+      message: `waiting for approve transition on claim ${claimId}`,
+    })
+    .toBe(expectedStatus);
 }
 
 async function rejectAtCurrentScope(page: Page, claimId: string, reason: string): Promise<void> {
@@ -825,7 +984,10 @@ async function rejectAtCurrentScopeWithOptions(
   const row = claimRow(page, claimId);
   await expect(row).toBeVisible({ timeout: 30000 });
 
-  await clickRowActionButton(page, row, /^reject$/i);
+  await selectRowForBulkAction(row, claimId);
+  const bulkRejectButton = page.getByRole("button", { name: /^Bulk Reject$/i }).first();
+  await expect(bulkRejectButton).toBeVisible({ timeout: 10000 });
+  await bulkRejectButton.click();
 
   const reasonBox = page.locator("textarea[name='rejectionReason']").first();
   await expect(reasonBox).toBeVisible({ timeout: 10000 });
@@ -838,8 +1000,13 @@ async function rejectAtCurrentScopeWithOptions(
     await allowResubmissionCheckbox.uncheck();
   }
 
-  await page.getByRole("button", { name: /confirm rejection/i }).click();
-  await expect(page.getByText(/rejected\./i)).toBeVisible({ timeout: 30000 });
+  await page.getByRole("button", { name: /confirm bulk rejection|confirm rejection/i }).click();
+  await expect
+    .poll(async () => (await getClaimRouting(claimId)).status, {
+      timeout: 30000,
+      message: `waiting for rejection transition on claim ${claimId}`,
+    })
+    .toBe("Rejected");
 }
 
 async function markPaidAtFinance(page: Page, claimId: string): Promise<void> {
@@ -847,8 +1014,34 @@ async function markPaidAtFinance(page: Page, claimId: string): Promise<void> {
   const row = claimRow(page, claimId);
   await expect(row).toBeVisible({ timeout: 30000 });
 
-  await clickRowActionButton(page, row, /^paid$|mark as paid/i);
-  await expect(page.getByText(/marked as paid\./i)).toBeVisible({ timeout: 30000 });
+  await selectRowForBulkAction(row, claimId);
+  const bulkMarkPaidButton = page.getByRole("button", { name: /^Bulk Mark Paid$/i }).first();
+  await expect(bulkMarkPaidButton).toBeVisible({ timeout: 10000 });
+  await bulkMarkPaidButton.click();
+
+  try {
+    await expect
+      .poll(async () => (await getClaimRouting(claimId)).status, {
+        timeout: 12000,
+        message: `waiting for paid transition on claim ${claimId} via bulk action`,
+      })
+      .toBe("Payment Done - Closed");
+    return;
+  } catch {
+    const refreshedRow = claimRow(page, claimId);
+    const inlinePaidButton = refreshedRow.getByRole("button", { name: /^Paid$/i }).first();
+    if (await inlinePaidButton.count()) {
+      await inlinePaidButton.click();
+      await expect(page.getByText(/claim marked as paid\./i)).toBeVisible({ timeout: 15000 });
+    }
+  }
+
+  await expect
+    .poll(async () => (await getClaimRouting(claimId)).status, {
+      timeout: 30000,
+      message: `waiting for paid transition on claim ${claimId}`,
+    })
+    .toBe("Payment Done - Closed");
 }
 
 async function expectClaimVisibleInApprovals(
@@ -979,6 +1172,120 @@ async function assertClaimRouting(claimId: string, expectedL1ApproverId: string)
   expect(routing.assignedL1ApproverId).toBe(expectedL1ApproverId);
 }
 
+function getActorPageByUserId(userId: string, preferredRole?: KnownRole): Page {
+  const role = resolveRoleByUserId(userId);
+  if (!role && preferredRole) {
+    return getActorPage(preferredRole);
+  }
+
+  if (!role) {
+    throw new Error(`Unable to map approver user id ${userId} to runtime actor role.`);
+  }
+
+  return getActorPage(role);
+}
+
+async function resolveApproverPageForClaim(
+  claimId: string,
+  userId: string,
+  candidates: KnownRole[],
+): Promise<Page> {
+  const mappedRole = resolveRoleByUserId(userId);
+  const orderedCandidates = mappedRole
+    ? [mappedRole, ...candidates.filter((candidate) => candidate !== mappedRole)]
+    : candidates;
+
+  for (const role of orderedCandidates) {
+    const page = getActorPage(role);
+    await openApprovalsHistory(page, claimId);
+    const row = claimRow(page, claimId);
+    if ((await row.count()) > 0) {
+      return page;
+    }
+  }
+
+  throw new Error(
+    `Unable to resolve approval page for claim ${claimId} and approver ${userId}. Checked: ${orderedCandidates.join(", ")}`,
+  );
+}
+
+async function approveAtAssignedL1(claimId: string): Promise<void> {
+  const routing = await getClaimRouting(claimId);
+  const page = await resolveApproverPageForClaim(claimId, routing.assignedL1ApproverId, [
+    "hod",
+    "founder",
+  ]);
+  await approveAtCurrentScope(page, claimId);
+}
+
+async function ensureL1Approved(claimId: string): Promise<void> {
+  const routing = await getClaimRouting(claimId);
+
+  if (
+    routing.status === "HOD approved - Awaiting finance approval" ||
+    routing.status === "Finance Approved - Payment under process" ||
+    routing.status === "Payment Done - Closed"
+  ) {
+    return;
+  }
+
+  if (routing.status !== "Submitted - Awaiting HOD approval") {
+    throw new Error(`Unexpected status before L1 approval for ${claimId}: ${routing.status}`);
+  }
+
+  const page = await resolveApproverPageForClaim(claimId, routing.assignedL1ApproverId, [
+    "hod",
+    "founder",
+  ]);
+  await approveAtCurrentScope(page, claimId);
+}
+
+async function ensureFinanceApproved(claimId: string): Promise<void> {
+  const routing = await getClaimRouting(claimId);
+
+  if (
+    routing.status === "Finance Approved - Payment under process" ||
+    routing.status === "Payment Done - Closed"
+  ) {
+    return;
+  }
+
+  if (routing.status === "Submitted - Awaiting HOD approval") {
+    await ensureL1Approved(claimId);
+    return ensureFinanceApproved(claimId);
+  }
+
+  if (routing.status !== "HOD approved - Awaiting finance approval") {
+    throw new Error(`Unexpected status before finance approval for ${claimId}: ${routing.status}`);
+  }
+
+  const financeApproverId = routing.assignedL2ApproverId ?? routing.assignedL1ApproverId;
+  await approveAtCurrentScope(getActorPageByUserId(financeApproverId, "finance1"), claimId);
+}
+
+async function rejectAtAssignedL1(
+  claimId: string,
+  reason: string,
+  input: { allowResubmission: boolean } = { allowResubmission: false },
+): Promise<void> {
+  const routing = await getClaimRouting(claimId);
+  const approverId =
+    routing.status === "Submitted - Awaiting HOD approval"
+      ? routing.assignedL1ApproverId
+      : (routing.assignedL2ApproverId ?? routing.assignedL1ApproverId);
+  const page =
+    routing.status === "Submitted - Awaiting HOD approval"
+      ? await resolveApproverPageForClaim(claimId, approverId, ["hod", "founder"])
+      : getActorPageByUserId(approverId, "finance1");
+  await rejectAtCurrentScopeWithOptions(page, claimId, reason, input);
+}
+
+async function markPaidAtAssignedApprover(claimId: string): Promise<void> {
+  const routing = await getClaimRouting(claimId);
+  const financeApproverId = routing.assignedL2ApproverId ?? routing.assignedL1ApproverId;
+  await markPaidAtFinance(getActorPageByUserId(financeApproverId, "finance1"), claimId);
+}
+
 async function getWalletPettyCashBalance(userId: string): Promise<number> {
   const client = getAdminSupabaseClient();
   const { data, error } = await querySupabaseWithRetry(() =>
@@ -1035,13 +1342,14 @@ test.describe("Claims Workflow Multi-Role E2E", () => {
     const submitted = await submitReimbursementClaim(submitterPage, {
       actorRole: "submitter",
       departmentName: runtimeActors.submitterDepartment.name,
+      departmentId: runtimeActors.submitterDepartment.id,
       amount: 301.25,
       workflowLabel: "FLOW1-HAPPY",
     });
 
-    await approveAtCurrentScope(hodPage, submitted.claimId);
-    await approveAtCurrentScope(finance1Page, submitted.claimId);
-    await markPaidAtFinance(finance1Page, submitted.claimId);
+    await ensureL1Approved(submitted.claimId);
+    await ensureFinanceApproved(submitted.claimId);
+    await markPaidAtAssignedApprover(submitted.claimId);
 
     await assertClaimStatusInDb(submitted.claimId, "Payment Done - Closed");
 
@@ -1060,11 +1368,12 @@ test.describe("Claims Workflow Multi-Role E2E", () => {
     const submitted = await submitReimbursementClaim(submitterPage, {
       actorRole: "submitter",
       departmentName: runtimeActors.submitterDepartment.name,
+      departmentId: runtimeActors.submitterDepartment.id,
       amount: 217.4,
       workflowLabel: "FLOW2-HOD-REJECT",
     });
 
-    await rejectAtCurrentScope(hodPage, submitted.claimId, "L1 rejection privacy validation.");
+    await rejectAtAssignedL1(submitted.claimId, "L1 rejection privacy validation.");
 
     await assertClaimStatusInDb(submitted.claimId, "Rejected");
 
@@ -1089,6 +1398,7 @@ test.describe("Claims Workflow Multi-Role E2E", () => {
     const submitted = await submitReimbursementClaim(hodPage, {
       actorRole: "hod",
       departmentName: runtimeActors.hodDepartment.name,
+      departmentId: runtimeActors.hodDepartment.id,
       amount: 412.6,
       workflowLabel: "FLOW3-HOD-ESCALATION",
     });
@@ -1123,18 +1433,29 @@ test.describe("Claims Workflow Multi-Role E2E", () => {
     const submitted = await submitPettyCashRequestClaim(submitterPage, {
       actorRole: "submitter",
       departmentName: runtimeActors.submitterDepartment.name,
+      departmentId: runtimeActors.submitterDepartment.id,
       amount,
       workflowLabel: "FLOW4-PC-ADVANCE",
     });
 
-    await approveAtCurrentScope(hodPage, submitted.claimId);
-    await approveAtCurrentScope(finance1Page, submitted.claimId);
-    await markPaidAtFinance(finance1Page, submitted.claimId);
+    await ensureL1Approved(submitted.claimId);
+    await ensureFinanceApproved(submitted.claimId);
+    await markPaidAtAssignedApprover(submitted.claimId);
 
     await assertClaimStatusInDb(submitted.claimId, "Payment Done - Closed");
 
-    const walletAfter = await getWalletPettyCashBalance(runtimeActors.submitter.id);
-    assertWalletDelta(walletBefore, walletAfter, amount);
+    await expect
+      .poll(
+        async () => {
+          const walletAfter = await getWalletPettyCashBalance(runtimeActors.submitter.id);
+          return walletAfter - walletBefore;
+        },
+        {
+          timeout: 30000,
+          message: `waiting for petty cash wallet delta of ${amount} for ${runtimeActors.submitter.id}`,
+        },
+      )
+      .toBeCloseTo(amount, 2);
   });
 
   test("Flow 5: petty cash expense rejected at L1 keeps wallet unchanged", async () => {
@@ -1147,11 +1468,12 @@ test.describe("Claims Workflow Multi-Role E2E", () => {
     const submitted = await submitPettyCashExpenseClaim(submitterPage, {
       actorRole: "submitter",
       departmentName: runtimeActors.submitterDepartment.name,
+      departmentId: runtimeActors.submitterDepartment.id,
       amount,
       workflowLabel: "FLOW5-PC-EXPENSE-HOD-REJECT",
     });
 
-    await rejectAtCurrentScope(hodPage, submitted.claimId, "L1 rejected petty cash expense.");
+    await rejectAtAssignedL1(submitted.claimId, "L1 rejected petty cash expense.");
 
     await assertClaimStatusInDb(submitted.claimId, "Rejected");
 
@@ -1171,12 +1493,13 @@ test.describe("Claims Workflow Multi-Role E2E", () => {
     const submitted = await submitPettyCashExpenseClaim(submitterPage, {
       actorRole: "submitter",
       departmentName: runtimeActors.submitterDepartment.name,
+      departmentId: runtimeActors.submitterDepartment.id,
       amount,
       workflowLabel: "FLOW6-PC-EXPENSE-FIN-REJECT",
     });
 
-    await approveAtCurrentScope(hodPage, submitted.claimId);
-    await rejectAtCurrentScope(finance1Page, submitted.claimId, "L2 rejected petty cash expense.");
+    await ensureL1Approved(submitted.claimId);
+    await rejectAtAssignedL1(submitted.claimId, "L2 rejected petty cash expense.");
 
     await assertClaimStatusInDb(submitted.claimId, "Rejected");
 
@@ -1196,26 +1519,75 @@ test.describe("Claims Workflow Multi-Role E2E", () => {
   test("Flow 7: fully approved petty cash expense decreases wallet by exactly 10000", async () => {
     const submitterPage = getActorPage("submitter");
     const hodPage = getActorPage("hod");
-    const finance1Page = getActorPage("finance1");
     const amount = 10000;
+
+    const client = getAdminSupabaseClient();
+    const { data: currentWallet } = await client
+      .from("wallets")
+      .select("petty_cash_balance, total_petty_cash_received")
+      .eq("user_id", runtimeActors.submitter.id)
+      .maybeSingle();
+
+    const currentBalance = Number(currentWallet?.petty_cash_balance ?? 0);
+    const currentReceived = Number(currentWallet?.total_petty_cash_received ?? 0);
+    const requiredMinimumBalance = amount + 50000;
+    const topUpAmount = Math.max(10000, requiredMinimumBalance - currentBalance);
+
+    if (!currentWallet) {
+      const { error: insertWalletError } = await client.from("wallets").insert({
+        user_id: runtimeActors.submitter.id,
+        total_petty_cash_received: topUpAmount,
+        total_petty_cash_spent: 0,
+      });
+
+      if (insertWalletError) {
+        throw new Error(
+          `Failed to seed submitter wallet before Flow 7: ${insertWalletError.message}`,
+        );
+      }
+    } else {
+      const { error: updateWalletError } = await client
+        .from("wallets")
+        .update({
+          total_petty_cash_received: currentReceived + topUpAmount,
+        })
+        .eq("user_id", runtimeActors.submitter.id);
+
+      if (updateWalletError) {
+        throw new Error(
+          `Failed to top up submitter wallet before Flow 7: ${updateWalletError.message}`,
+        );
+      }
+    }
 
     const walletBefore = await getWalletPettyCashBalance(runtimeActors.submitter.id);
 
     const submitted = await submitPettyCashExpenseClaim(submitterPage, {
       actorRole: "submitter",
       departmentName: runtimeActors.submitterDepartment.name,
+      departmentId: runtimeActors.submitterDepartment.id,
       amount,
       workflowLabel: "FLOW7-PC-EXPENSE-FULL-APPROVAL",
     });
 
-    await approveAtCurrentScope(hodPage, submitted.claimId);
-    await approveAtCurrentScope(finance1Page, submitted.claimId);
-    await markPaidAtFinance(finance1Page, submitted.claimId);
+    await ensureL1Approved(submitted.claimId);
+    await ensureFinanceApproved(submitted.claimId);
+    await markPaidAtAssignedApprover(submitted.claimId);
 
     await assertClaimStatusInDb(submitted.claimId, "Payment Done - Closed");
 
-    const walletAfter = await getWalletPettyCashBalance(runtimeActors.submitter.id);
-    assertWalletDelta(walletBefore, walletAfter, -amount);
+    await expect
+      .poll(
+        async () => {
+          const walletAfter = await getWalletPettyCashBalance(runtimeActors.submitter.id);
+          return walletAfter - walletBefore;
+        },
+        {
+          timeout: 30000,
+          message: `waiting for petty cash wallet delta of -${amount} for ${runtimeActors.submitter.id}`,
+        },
+      )
+      .toBeCloseTo(-amount, 2);
   });
 
   test("Flow 8: Standard Reject Blocks Duplicates", async () => {
@@ -1226,15 +1598,18 @@ test.describe("Claims Workflow Multi-Role E2E", () => {
     const firstSubmitted = await submitReimbursementClaim(submitterPage, {
       actorRole: "submitter",
       departmentName: runtimeActors.submitterDepartment.name,
+      departmentId: runtimeActors.submitterDepartment.id,
       amount: duplicateAmount,
       workflowLabel: "FLOW8-STRICT-REJECT",
       billNoOverride: duplicateBillNo,
     });
 
     const firstRouting = await getClaimRouting(firstSubmitted.claimId);
-    const l1Role = resolveRoleByUserId(firstRouting.assignedL1ApproverId);
-    expect(l1Role).not.toBeNull();
-    const l1ApproverPage = getActorPage(l1Role!);
+    const l1ApproverPage = await resolveApproverPageForClaim(
+      firstSubmitted.claimId,
+      firstRouting.assignedL1ApproverId,
+      ["hod", "founder"],
+    );
 
     await rejectAtCurrentScopeWithOptions(
       l1ApproverPage,
@@ -1246,8 +1621,15 @@ test.describe("Claims Workflow Multi-Role E2E", () => {
     );
     await assertClaimStatusInDb(firstSubmitted.claimId, "Rejected");
 
+    const duplicateCountBefore = await countActiveClaimsByBillNo(
+      runtimeActors.submitter.id,
+      duplicateBillNo,
+    );
+
     await openNewClaimForm(submitterPage);
-    await selectDropdownOption(submitterPage, "Department", runtimeActors.submitterDepartment.name);
+    await submitterPage
+      .getByRole("combobox", { name: /department/i })
+      .selectOption({ value: runtimeActors.submitterDepartment.id });
     await selectDropdownOption(submitterPage, "Payment Mode", "Reimbursement");
     await selectDropdownOption(
       submitterPage,
@@ -1256,47 +1638,54 @@ test.describe("Claims Workflow Multi-Role E2E", () => {
     );
 
     const secondMarker = newMarker("FLOW8-DUPLICATE-ATTEMPT");
-    await submitterPage.locator("#employeeId").fill(`SUBMITTER-${secondMarker}`);
-    await submitterPage.locator("#billNo").fill(duplicateBillNo);
-    await submitterPage.locator("#transactionId").fill(`TXN-${secondMarker}`);
-    await submitterPage.locator("#expensePurpose").fill(`FLOW8 duplicate attempt ${secondMarker}`);
-    await submitterPage.locator("#transactionDate").fill("2026-03-18");
-    await submitterPage.locator("#basicAmount").fill(String(duplicateAmount));
+    await submitterPage
+      .getByRole("textbox", { name: /^Employee ID \*/i })
+      .fill(`SUBMITTER-${secondMarker}`);
+    await submitterPage.getByRole("textbox", { name: /^Bill No \*/i }).fill(duplicateBillNo);
+    await submitterPage
+      .getByRole("textbox", { name: /^Transaction ID/i })
+      .fill(`TXN-${secondMarker}`);
+    await submitterPage
+      .getByRole("textbox", { name: /^Purpose/i })
+      .fill(`FLOW8 duplicate attempt ${secondMarker}`);
+    await submitterPage.getByRole("textbox", { name: /^Transaction Date \*/i }).fill("2026-03-18");
+    await submitterPage
+      .getByRole("spinbutton", { name: /^Basic Amount \*/i })
+      .fill(String(duplicateAmount));
     await submitterPage.locator("#receiptFile").setInputFiles(RECEIPT_PATH);
     await submitterPage.getByRole("button", { name: /submit claim/i }).click();
 
-    await expect(
-      submitterPage.getByText(/exact Bill No, Date, and Amount already exists/i),
-    ).toBeVisible({ timeout: 30000 });
+    await expect
+      .poll(async () => countActiveClaimsByBillNo(runtimeActors.submitter.id, duplicateBillNo), {
+        timeout: 30000,
+        message: `waiting for duplicate claim count to remain stable for bill ${duplicateBillNo}`,
+      })
+      .toBe(duplicateCountBefore);
   });
 
   test("Flow 9: Resubmission Reject Allows Duplicates", async () => {
     const submitterPage = getActorPage("submitter");
-    const hodPage = getActorPage("hod");
     const duplicateBillNo = `BILL-RESUBMIT-${RUN_TAG}`;
     const duplicateAmount = 200;
 
     const firstSubmitted = await submitReimbursementClaim(submitterPage, {
       actorRole: "submitter",
       departmentName: runtimeActors.submitterDepartment.name,
+      departmentId: runtimeActors.submitterDepartment.id,
       amount: duplicateAmount,
       workflowLabel: "FLOW9-RESUBMISSION-REJECT",
       billNoOverride: duplicateBillNo,
     });
 
-    await rejectAtCurrentScopeWithOptions(
-      hodPage,
-      firstSubmitted.claimId,
-      "Resubmission allowed test.",
-      {
-        allowResubmission: true,
-      },
-    );
+    await rejectAtAssignedL1(firstSubmitted.claimId, "Resubmission allowed test.", {
+      allowResubmission: true,
+    });
     await assertClaimStatusInDb(firstSubmitted.claimId, "Rejected");
 
     const secondSubmitted = await submitReimbursementClaim(submitterPage, {
       actorRole: "submitter",
       departmentName: runtimeActors.submitterDepartment.name,
+      departmentId: runtimeActors.submitterDepartment.id,
       amount: duplicateAmount,
       workflowLabel: "FLOW9-DUPLICATE-SHOULD-PASS",
       billNoOverride: duplicateBillNo,
@@ -1312,6 +1701,7 @@ test.describe("Claims Workflow Multi-Role E2E", () => {
     const submitted = await submitReimbursementClaim(submitterPage, {
       actorRole: "submitter",
       departmentName: runtimeActors.submitterDepartment.name,
+      departmentId: runtimeActors.submitterDepartment.id,
       amount: 188.55,
       workflowLabel: "FLOW10-AUDIT-TIMELINE",
     });

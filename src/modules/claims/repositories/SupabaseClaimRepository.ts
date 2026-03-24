@@ -332,6 +332,11 @@ type ExportClaimRow = {
   advance_details: ExportClaimAdvanceRow | ExportClaimAdvanceRow[] | null;
 };
 
+type ExportWalletBalanceRow = {
+  user_id: string;
+  petty_cash_balance: number | string | null;
+};
+
 function mapOptionRows(rows: ClaimOptionRow[] | null): ClaimDropdownOption[] {
   return (rows ?? []).map((row) => ({
     id: row.id,
@@ -2502,12 +2507,35 @@ export class SupabaseClaimRepository implements ClaimRepository {
 
     const rows = (data ?? []) as ExportClaimRow[];
     const rowById = new Map(rows.map((row) => [row.id, row]));
+    const walletUserIds = Array.from(
+      new Set(rows.map((row) => row.on_behalf_of_id ?? row.submitted_by).filter(Boolean)),
+    );
+    const walletBalanceByUserId = new Map<string, number | null>();
+
+    if (walletUserIds.length > 0) {
+      const { data: walletRows, error: walletError } = await client
+        .from("wallets")
+        .select("user_id, petty_cash_balance")
+        .in("user_id", walletUserIds);
+
+      if (walletError) {
+        return {
+          data: [],
+          errorMessage: walletError.message,
+        };
+      }
+
+      for (const walletRow of (walletRows ?? []) as ExportWalletBalanceRow[]) {
+        walletBalanceByUserId.set(walletRow.user_id, toNumber(walletRow.petty_cash_balance));
+      }
+    }
 
     return {
       data: orderedClaimIds
         .map((id) => rowById.get(id))
         .filter((row): row is ExportClaimRow => Boolean(row))
         .map((row) => {
+          const walletUserId = row.on_behalf_of_id ?? row.submitted_by;
           const submitter = getSingleRelation(row.submitter_user);
           const beneficiary = getSingleRelation(row.beneficiary_user);
           const l1Approver = getSingleRelation(row.l1_approver_user);
@@ -2551,6 +2579,7 @@ export class SupabaseClaimRepository implements ClaimRepository {
             submitterEmail: submitter?.email ?? null,
             beneficiaryName: beneficiary?.full_name ?? null,
             beneficiaryEmail: beneficiary?.email ?? null,
+            pettyCashBalance: walletBalanceByUserId.get(walletUserId) ?? null,
             l1ApproverName: l1Approver?.full_name ?? null,
             l1ApproverEmail: l1Approver?.email ?? null,
             l2ApproverName: l2Approver?.full_name ?? null,

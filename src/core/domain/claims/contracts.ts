@@ -163,6 +163,7 @@ export type ClaimFullExportRecord = {
   submitterEmail: string | null;
   beneficiaryName: string | null;
   beneficiaryEmail: string | null;
+  pettyCashBalance: number | null;
   l1ApproverName: string | null;
   l1ApproverEmail: string | null;
   l2ApproverName: string | null;

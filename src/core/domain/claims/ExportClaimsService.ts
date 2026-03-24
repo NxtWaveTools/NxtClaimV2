@@ -4,6 +4,7 @@ import type {
   ClaimsExportFetchScope,
   GetMyClaimsFilters,
 } from "@/core/domain/claims/contracts";
+import { DB_CLAIM_STATUSES, type DbClaimStatus } from "@/core/constants/statuses";
 
 type ExportClaimsRepository = {
   getApprovalViewerContext(userId: string): Promise<{
@@ -44,89 +45,43 @@ const EXPORT_BATCH_SIZE = 500;
 
 const CSV_HEADERS = [
   "Claim ID",
-  "Status",
-  "Submission Type",
-  "Detail Type",
-  "Submitted At (Raw)",
-  "Submitted At (Formatted)",
-  "Created At (Raw)",
-  "Created At (Formatted)",
-  "Updated At (Raw)",
-  "Updated At (Formatted)",
-  "HOD Action At (Raw)",
-  "HOD Action At (Formatted)",
-  "Finance Action At (Raw)",
-  "Finance Action At (Formatted)",
-  "Rejection Reason",
-  "Is Resubmission Allowed",
-  "Employee ID",
-  "CC Emails",
-  "On Behalf Email",
-  "On Behalf Employee Code",
-  "Submitted By User ID",
-  "On Behalf Of User ID",
-  "Submitter Name",
-  "Submitter Email",
-  "Beneficiary Name",
-  "Beneficiary Email",
-  "Department ID",
+  "Transaction ID",
+  "Employee Email",
+  "Employee Name",
   "Department",
-  "Payment Mode ID",
+  "Petty Cash Balance",
+  "Submitter",
   "Payment Mode",
-  "Assigned L1 Approver ID",
-  "Assigned L2 Approver ID",
-  "L1 Approver Name",
-  "L1 Approver Email",
-  "L2 Approver Name",
-  "L2 Approver Email",
-  "Expense Bill No",
-  "Expense Transaction ID",
-  "Expense Date",
-  "Expense Date (Formatted)",
-  "Expense Category ID",
-  "Expense Category",
-  "Expense Product ID",
-  "Expense Product",
-  "Expense Location ID",
-  "Expense Location",
+  "Submission Type",
   "Purpose",
-  "GST Applicable",
-  "GST Number",
-  "Basic Amount (Raw)",
-  "Basic Amount (Formatted)",
-  "CGST Amount (Raw)",
-  "CGST Amount (Formatted)",
-  "SGST Amount (Raw)",
-  "SGST Amount (Formatted)",
-  "IGST Amount (Raw)",
-  "IGST Amount (Formatted)",
-  "Total Amount (Raw)",
-  "Total Amount (Formatted)",
+  "Claim Raised Date",
+  "HOD Approved Date",
+  "Finance Approved Date",
+  "Bill Date",
+  "Claim Status",
+  "HOD Status",
+  "Finance Status",
+  "Bill Status",
+  "Bill Number",
+  "Basic Amount",
+  "CGST",
+  "SGST",
+  "IGST",
+  "Total Amount",
   "Currency",
+  "Approved Amount",
   "Vendor Name",
-  "People Involved",
-  "Expense Remarks",
-  "Receipt Name",
-  "Receipt File Path",
-  "Receipt URL",
-  "Bank Statement Name",
-  "Bank Statement File Path",
+  "Transaction Category",
+  "Product",
+  "Expense Location",
+  "Location Type",
   "Bank Statement URL",
-  "Advance Requested Amount (Raw)",
-  "Advance Requested Amount (Formatted)",
-  "Advance Budget Month",
-  "Advance Budget Year",
-  "Advance Expected Usage Date (Raw)",
-  "Advance Expected Usage Date (Formatted)",
-  "Advance Purpose",
-  "Advance Product ID",
-  "Advance Product",
-  "Advance Location ID",
-  "Advance Location",
-  "Advance Remarks",
-  "Supporting Document Name",
-  "Supporting Document Path",
-  "Supporting Document URL",
+  "Bill URL",
+  "Petty Cash Photo URL",
+  "Petty Cash Request Month",
+  "Transaction Count",
+  "Claim Remarks",
+  "Transaction Remarks",
 ] as const;
 
 function escapeCsvValue(value: string | number | boolean | null | undefined): string {
@@ -148,51 +103,96 @@ function buildCsvRow(values: Array<string | number | boolean | null | undefined>
   return values.map((value) => escapeCsvValue(value)).join(",");
 }
 
-function formatDateDisplay(value: string | null): string {
+function formatBusinessDate(value: string | null): string {
   if (!value) {
-    return "";
+    return "N/A";
   }
 
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) {
-    return "";
+    return "N/A";
   }
 
   const year = parsed.getUTCFullYear();
   const month = String(parsed.getUTCMonth() + 1).padStart(2, "0");
   const day = String(parsed.getUTCDate()).padStart(2, "0");
-  const hours = String(parsed.getUTCHours()).padStart(2, "0");
-  const minutes = String(parsed.getUTCMinutes()).padStart(2, "0");
-  const seconds = String(parsed.getUTCSeconds()).padStart(2, "0");
 
-  return `${year}-${month}-${day} ${hours}:${minutes}:${seconds} UTC`;
+  return `${year}-${month}-${day}`;
 }
 
 function formatAmountDisplay(value: number | null): string {
   if (value == null) {
-    return "";
-  }
-
-  return new Intl.NumberFormat("en-IN", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(value);
-}
-
-function toRawAmount(value: number | null): string {
-  if (value == null) {
-    return "";
+    return "N/A";
   }
 
   return value.toFixed(2);
 }
 
-function toBooleanCsv(value: boolean | null): string {
-  if (value == null) {
-    return "";
+function toTextValue(value: string | null): string {
+  if (!value || value.trim().length === 0) {
+    return "N/A";
   }
 
-  return value ? "Yes" : "No";
+  return value;
+}
+
+function toExcelHyperlink(value: string | null): string {
+  if (!value || value.trim().length === 0) {
+    return "N/A";
+  }
+
+  const normalized = value.trim();
+  if (!/^https?:\/\//i.test(normalized)) {
+    return "N/A";
+  }
+
+  const escapedUrl = normalized.replace(/"/g, '""');
+  return `=HYPERLINK("${escapedUrl}", "View Document")`;
+}
+
+function deriveWorkflowStatuses(input: { status: DbClaimStatus; financeActionAt: string | null }): {
+  hodStatus: string;
+  financeStatus: string;
+  billStatus: string;
+} {
+  switch (input.status) {
+    case DB_CLAIM_STATUSES[0]:
+      return {
+        hodStatus: "Pending",
+        financeStatus: "Pending",
+        billStatus: "Pending",
+      };
+    case DB_CLAIM_STATUSES[1]:
+      return {
+        hodStatus: "Approved",
+        financeStatus: "Pending",
+        billStatus: "Pending",
+      };
+    case DB_CLAIM_STATUSES[2]:
+      return {
+        hodStatus: "Approved",
+        financeStatus: "Approved",
+        billStatus: "Pending",
+      };
+    case DB_CLAIM_STATUSES[3]:
+      return {
+        hodStatus: "Approved",
+        financeStatus: "Approved",
+        billStatus: "Paid",
+      };
+    case DB_CLAIM_STATUSES[4]:
+      return {
+        hodStatus: input.financeActionAt ? "Approved" : "Rejected",
+        financeStatus: input.financeActionAt ? "Rejected" : "N/A",
+        billStatus: "Rejected",
+      };
+    default:
+      return {
+        hodStatus: "Pending",
+        financeStatus: "Pending",
+        billStatus: "Pending",
+      };
+  }
 }
 
 function resolveExportScope(
@@ -223,14 +223,12 @@ function resolveFilenameDateTag(): string {
   return `${year}${month}${day}`;
 }
 
-function extractFileName(filePath: string | null): string {
-  if (!filePath) {
-    return "";
+function toPettyCashRequestMonth(month: number | null, year: number | null): string {
+  if (!month || !year) {
+    return "N/A";
   }
 
-  const normalized = filePath.replace(/\\/g, "/");
-  const name = normalized.split("/").pop();
-  return name ?? "";
+  return `${year}-${String(month).padStart(2, "0")}`;
 }
 
 export class ExportClaimsService {
@@ -331,99 +329,74 @@ export class ExportClaimsService {
 
       const totalAmountRaw =
         row.detailType === "expense"
-          ? toRawAmount(row.expenseTotalAmount)
-          : toRawAmount(row.advanceRequestedAmount);
-      const totalAmountFormatted =
-        row.detailType === "expense"
           ? formatAmountDisplay(row.expenseTotalAmount)
           : formatAmountDisplay(row.advanceRequestedAmount);
+      const workflowStatuses = deriveWorkflowStatuses({
+        status: row.status,
+        financeActionAt: row.financeActionAt,
+      });
+      const beneficiaryName = row.beneficiaryName ?? row.submitterName;
+      const beneficiaryEmail = row.beneficiaryEmail ?? row.submitterEmail;
+      const submitter = row.submitterName ?? row.submitterEmail;
+      const purpose = row.detailType === "expense" ? row.expensePurpose : row.advancePurpose;
+      const product =
+        row.detailType === "expense" ? row.expenseProductName : row.advanceProductName;
+      const location =
+        row.detailType === "expense" ? row.expenseLocationName : row.advanceLocationName;
+      const transactionRemarks =
+        row.detailType === "expense" ? row.expenseRemarks : row.advanceRemarks;
+      const approvedAmount =
+        row.status === DB_CLAIM_STATUSES[2] || row.status === DB_CLAIM_STATUSES[3]
+          ? totalAmountRaw
+          : "N/A";
+      const billDate =
+        row.detailType === "expense"
+          ? formatBusinessDate(row.expenseTransactionDate)
+          : formatBusinessDate(row.advanceExpectedUsageDate);
+      const billUrl = receiptUrlResult.data;
+      const pettyCashPhotoUrl =
+        row.detailType === "expense" ? receiptUrlResult.data : supportingUrlResult.data;
 
       csvLines.push(
         buildCsvRow([
           row.claimId,
-          row.status,
+          toTextValue(row.expenseTransactionId),
+          toTextValue(beneficiaryEmail),
+          toTextValue(beneficiaryName),
+          toTextValue(row.departmentName),
+          formatAmountDisplay(row.pettyCashBalance),
+          toTextValue(submitter),
+          toTextValue(row.paymentModeName),
           row.submissionType,
-          row.detailType,
-          row.submittedAt,
-          formatDateDisplay(row.submittedAt),
-          row.createdAt,
-          formatDateDisplay(row.createdAt),
-          row.updatedAt,
-          formatDateDisplay(row.updatedAt),
-          row.hodActionAt,
-          formatDateDisplay(row.hodActionAt),
-          row.financeActionAt,
-          formatDateDisplay(row.financeActionAt),
-          row.rejectionReason,
-          row.isResubmissionAllowed,
-          row.employeeId,
-          row.ccEmails,
-          row.onBehalfEmail,
-          row.onBehalfEmployeeCode,
-          row.submittedBy,
-          row.onBehalfOfId,
-          row.submitterName,
-          row.submitterEmail,
-          row.beneficiaryName,
-          row.beneficiaryEmail,
-          row.departmentId,
-          row.departmentName,
-          row.paymentModeId,
-          row.paymentModeName,
-          row.assignedL1ApproverId,
-          row.assignedL2ApproverId,
-          row.l1ApproverName,
-          row.l1ApproverEmail,
-          row.l2ApproverName,
-          row.l2ApproverEmail,
-          row.expenseBillNo,
-          row.expenseTransactionId,
-          row.expenseTransactionDate,
-          formatDateDisplay(row.expenseTransactionDate),
-          row.expenseCategoryId,
-          row.expenseCategoryName,
-          row.expenseProductId,
-          row.expenseProductName,
-          row.expenseLocationId,
-          row.expenseLocationName,
-          row.detailType === "expense" ? row.expensePurpose : row.advancePurpose,
-          toBooleanCsv(row.expenseIsGstApplicable),
-          row.expenseGstNumber,
-          toRawAmount(row.expenseBasicAmount),
+          toTextValue(purpose),
+          formatBusinessDate(row.submittedAt),
+          formatBusinessDate(row.hodActionAt),
+          formatBusinessDate(row.financeActionAt),
+          billDate,
+          row.status,
+          workflowStatuses.hodStatus,
+          workflowStatuses.financeStatus,
+          workflowStatuses.billStatus,
+          toTextValue(row.expenseBillNo),
           formatAmountDisplay(row.expenseBasicAmount),
-          toRawAmount(row.expenseCgstAmount),
           formatAmountDisplay(row.expenseCgstAmount),
-          toRawAmount(row.expenseSgstAmount),
           formatAmountDisplay(row.expenseSgstAmount),
-          toRawAmount(row.expenseIgstAmount),
           formatAmountDisplay(row.expenseIgstAmount),
           totalAmountRaw,
-          totalAmountFormatted,
-          row.expenseCurrencyCode,
-          row.expenseVendorName,
-          row.expensePeopleInvolved,
-          row.expenseRemarks,
-          extractFileName(row.expenseReceiptFilePath),
-          row.expenseReceiptFilePath,
-          receiptUrlResult.data,
-          extractFileName(row.expenseBankStatementFilePath),
-          row.expenseBankStatementFilePath,
-          bankStatementUrlResult.data,
-          toRawAmount(row.advanceRequestedAmount),
-          formatAmountDisplay(row.advanceRequestedAmount),
-          row.advanceBudgetMonth,
-          row.advanceBudgetYear,
-          row.advanceExpectedUsageDate,
-          formatDateDisplay(row.advanceExpectedUsageDate),
-          row.advancePurpose,
-          row.advanceProductId,
-          row.advanceProductName,
-          row.advanceLocationId,
-          row.advanceLocationName,
-          row.advanceRemarks,
-          extractFileName(row.advanceSupportingDocumentPath),
-          row.advanceSupportingDocumentPath,
-          supportingUrlResult.data,
+          toTextValue(row.expenseCurrencyCode ?? "INR"),
+          approvedAmount,
+          toTextValue(row.expenseVendorName),
+          toTextValue(row.expenseCategoryName),
+          toTextValue(product),
+          toTextValue(location),
+          "N/A",
+          toExcelHyperlink(bankStatementUrlResult.data),
+          toExcelHyperlink(billUrl),
+          toExcelHyperlink(pettyCashPhotoUrl),
+          toPettyCashRequestMonth(row.advanceBudgetMonth, row.advanceBudgetYear),
+          "1",
+          toTextValue(row.rejectionReason),
+          toTextValue(transactionRemarks),
         ]),
       );
     }

@@ -31,6 +31,7 @@ function createBaseRecord(overrides?: Partial<ClaimFullExportRecord>): ClaimFull
     submitterEmail: "submitter@nxtwave.co.in",
     beneficiaryName: "Submitter One",
     beneficiaryEmail: "submitter@nxtwave.co.in",
+    pettyCashBalance: 2400.5,
     l1ApproverName: "HOD One",
     l1ApproverEmail: "hod@nxtwave.co.in",
     l2ApproverName: "Finance One",
@@ -125,17 +126,50 @@ describe("ExportClaimsService", () => {
     const [headerLine, dataLine] = result.csvData.trim().split("\n");
     const headers = headerLine.split(",");
 
-    expect(headers).toContain("GST Number");
-    expect(headers).toContain("Expense Date");
-    expect(headers).toContain("Purpose");
-    expect(headers).toContain("Receipt URL");
-    expect(headers).toContain("Bank Statement URL");
-    expect(headers).toContain("Supporting Document URL");
+    expect(headers).toHaveLength(38);
+    expect(headers).toEqual([
+      "Claim ID",
+      "Transaction ID",
+      "Employee Email",
+      "Employee Name",
+      "Department",
+      "Petty Cash Balance",
+      "Submitter",
+      "Payment Mode",
+      "Submission Type",
+      "Purpose",
+      "Claim Raised Date",
+      "HOD Approved Date",
+      "Finance Approved Date",
+      "Bill Date",
+      "Claim Status",
+      "HOD Status",
+      "Finance Status",
+      "Bill Status",
+      "Bill Number",
+      "Basic Amount",
+      "CGST",
+      "SGST",
+      "IGST",
+      "Total Amount",
+      "Currency",
+      "Approved Amount",
+      "Vendor Name",
+      "Transaction Category",
+      "Product",
+      "Expense Location",
+      "Location Type",
+      "Bank Statement URL",
+      "Bill URL",
+      "Petty Cash Photo URL",
+      "Petty Cash Request Month",
+      "Transaction Count",
+      "Claim Remarks",
+      "Transaction Remarks",
+    ]);
 
-    expect(dataLine).toContain("GST1234");
-    expect(dataLine).toContain(
-      "https://example.supabase.co/storage/v1/object/public/claims/expenses/user-1/receipt.pdf",
-    );
+    expect(dataLine).toContain("CLAIM-EMP001-20260324-0001");
+    expect(dataLine).toContain("=HYPERLINK(");
   });
 
   it("bypasses pagination by requesting multiple backend batches", async () => {
