@@ -5,16 +5,17 @@ export default defineConfig({
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
-  workers: process.env.CI ? 1 : undefined,
+  workers: process.env.CI ? 1 : 3,
+  globalSetup: "./tests/global.setup.ts",
   reporter: "html",
   use: {
     baseURL: "http://127.0.0.1:3000",
-    headless: false,
+    headless: true,
+    actionTimeout: 15000,
+    screenshot: "only-on-failure",
     video: "retain-on-failure",
-    trace: "retain-on-failure",
-    launchOptions: {
-      slowMo: 800,
-    },
+    viewport: { width: 1920, height: 1080 },
+    trace: "on-first-retry",
   },
   projects: [
     {

@@ -197,14 +197,6 @@ export const newClaimSubmitSchema = z
             path: ["expense", "bankStatementFileType"],
           });
         }
-
-        if (value.expense.bankStatementFileBase64 === "N/A") {
-          context.addIssue({
-            code: "custom",
-            message: "Bank statement file content is required when bank statement is attached.",
-            path: ["expense", "bankStatementFileBase64"],
-          });
-        }
       }
     }
 

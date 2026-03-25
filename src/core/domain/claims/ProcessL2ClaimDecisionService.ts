@@ -13,9 +13,11 @@ type ProcessL2ClaimDecisionRepository = {
   ): Promise<{ data: string[]; errorMessage: string | null }>;
   updateClaimL2Decision(input: {
     claimId: string;
+    actorUserId: string;
     status: DbClaimStatus;
     assignedL2ApproverId: string | null;
     rejectionReason: string | null;
+    allowResubmission: boolean;
   }): Promise<{ errorMessage: string | null }>;
 };
 
@@ -39,6 +41,7 @@ export class ProcessL2ClaimDecisionService {
     actorUserId: string;
     decision: DecisionType;
     rejectionReason?: string;
+    allowResubmission?: boolean;
   }): Promise<{ ok: boolean; errorMessage: string | null }> {
     const claimResult = await this.repository.getClaimForL2Decision(input.claimId);
 
@@ -104,7 +107,7 @@ export class ProcessL2ClaimDecisionService {
       if (input.decision === "reject") {
         const normalizedReason = input.rejectionReason?.trim() ?? "";
 
-        if (!normalizedReason) {
+        if (normalizedReason.length < 5) {
           return {
             ok: false,
             errorMessage: "Rejection reason is required.",
@@ -119,9 +122,11 @@ export class ProcessL2ClaimDecisionService {
 
     const updateResult = await this.repository.updateClaimL2Decision({
       claimId: input.claimId,
+      actorUserId: input.actorUserId,
       status: nextStatus,
       assignedL2ApproverId: actorFinanceApproverId,
       rejectionReason,
+      allowResubmission: input.decision === "reject" ? input.allowResubmission === true : false,
     });
 
     if (updateResult.errorMessage) {

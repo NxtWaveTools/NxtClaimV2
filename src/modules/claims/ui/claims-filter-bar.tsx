@@ -5,6 +5,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ROUTES } from "@/core/config/route-registry";
 import { DB_CLAIM_STATUSES } from "@/core/constants/statuses";
 import { getAccessTokenAction } from "@/modules/auth/actions";
+import { exportClaimsCsvAction } from "@/modules/claims/actions/export-claims";
 import type {
   ClaimDateTarget,
   ClaimSearchField,
@@ -71,15 +72,6 @@ function hasActiveFilterParams(params: URLSearchParams): boolean {
   });
 }
 
-type ClaimsFilterBarProps = {
-  exportScope: "submissions" | "approvals";
-  paymentModes: Array<{ id: string; name: string }>;
-  departments: Array<{ id: string; name: string }>;
-  locations: Array<{ id: string; name: string }>;
-  products: Array<{ id: string; name: string }>;
-  expenseCategories: Array<{ id: string; name: string }>;
-};
-
 function extractFilenameFromDisposition(dispositionHeader: string | null): string | null {
   if (!dispositionHeader) {
     return null;
@@ -98,8 +90,19 @@ function extractFilenameFromDisposition(dispositionHeader: string | null): strin
   return null;
 }
 
+type ClaimsFilterBarProps = {
+  exportScope: "submissions" | "approvals";
+  defaultFiltersExpanded?: boolean;
+  paymentModes: Array<{ id: string; name: string }>;
+  departments: Array<{ id: string; name: string }>;
+  locations: Array<{ id: string; name: string }>;
+  products: Array<{ id: string; name: string }>;
+  expenseCategories: Array<{ id: string; name: string }>;
+};
+
 export function ClaimsFilterBar({
   exportScope,
+  defaultFiltersExpanded = false,
   paymentModes,
   departments,
   locations,
@@ -116,9 +119,14 @@ export function ClaimsFilterBar({
   const [searchInput, setSearchInput] = useState(currentSearchQuery);
   const [debouncedSearchInput, setDebouncedSearchInput] = useState(currentSearchQuery);
   const [isExporting, setIsExporting] = useState(false);
-  const [isFiltersExpanded, setIsFiltersExpanded] = useState(() =>
-    hasActiveFilterParams(new URLSearchParams(searchParams.toString())),
-  );
+
+  const filtersParam = currentParams.get("filters");
+  const isFiltersExpanded =
+    filtersParam === "open"
+      ? true
+      : filtersParam === "closed"
+        ? false
+        : defaultFiltersExpanded || hasActiveFilterParams(currentParams);
 
   useEffect(() => {
     setSearchInput(currentSearchQuery);
@@ -210,33 +218,45 @@ export function ClaimsFilterBar({
     setIsExporting(true);
 
     try {
-      const accessToken = await getAccessTokenAction();
-
-      if (!accessToken) {
-        router.push(ROUTES.login);
-        return;
-      }
-
       const params = new URLSearchParams(searchParams.toString());
       params.delete("cursor");
       params.delete("prevCursor");
-      params.set("scope", exportScope);
-
-      const response = await fetch(`${ROUTES.exportApi.claims}?${params.toString()}`, {
-        method: "GET",
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
+      const actionResponse = await exportClaimsCsvAction({
+        scope: exportScope,
+        searchParams: params.toString(),
       });
 
-      if (!response.ok) {
-        throw new Error(`Export failed with status ${response.status}`);
-      }
+      let fileBlob: Blob;
+      let fileName = "claims_export.csv";
 
-      const fileBlob = await response.blob();
-      const fallbackName = "claims_export.csv";
-      const fileName =
-        extractFilenameFromDisposition(response.headers.get("content-disposition")) ?? fallbackName;
+      if (actionResponse.data && !actionResponse.error) {
+        fileBlob = new Blob([actionResponse.data.csvData], { type: "text/csv;charset=utf-8" });
+        fileName = actionResponse.data.fileName || fileName;
+      } else {
+        const accessToken = await getAccessTokenAction();
+        if (!accessToken) {
+          router.push(ROUTES.login);
+          return;
+        }
+
+        params.set("scope", exportScope);
+        const response = await fetch(`${ROUTES.exportApi.claims}?${params.toString()}`, {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+        });
+
+        if (!response.ok) {
+          throw new Error(
+            actionResponse.error?.message ?? `Export failed with status ${response.status}`,
+          );
+        }
+
+        fileBlob = await response.blob();
+        fileName =
+          extractFilenameFromDisposition(response.headers.get("content-disposition")) ?? fileName;
+      }
       const objectUrl = URL.createObjectURL(fileBlob);
 
       const anchor = document.createElement("a");
@@ -300,7 +320,11 @@ export function ClaimsFilterBar({
           <button
             type="button"
             onClick={() => {
-              setIsFiltersExpanded((previous) => !previous);
+              const nextParams = new URLSearchParams(searchParams.toString());
+              nextParams.set("filters", isFiltersExpanded ? "closed" : "open");
+              nextParams.delete("cursor");
+              nextParams.delete("prevCursor");
+              updateUrlWithMutation(nextParams, pathname, router);
             }}
             className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
             aria-expanded={isFiltersExpanded}
@@ -354,7 +378,19 @@ export function ClaimsFilterBar({
             onClick={() => {
               setSearchInput("");
               setDebouncedSearchInput("");
-              router.push(pathname);
+              const nextParams = new URLSearchParams();
+              const currentView = searchParams.get("view");
+              const currentFilters = searchParams.get("filters");
+
+              if (currentView) {
+                nextParams.set("view", currentView);
+              }
+
+              if (currentFilters) {
+                nextParams.set("filters", currentFilters);
+              }
+
+              updateUrlWithMutation(nextParams, pathname, router);
             }}
             className="inline-flex rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
           >

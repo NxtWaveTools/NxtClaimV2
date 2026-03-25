@@ -135,6 +135,75 @@ export type ClaimExportRecord = {
   financeActionDate: string | null;
 };
 
+export type ClaimFullExportRecord = {
+  claimId: string;
+  status: DbClaimStatus;
+  submissionType: ClaimSubmissionType;
+  detailType: ClaimDetailType;
+  submittedBy: string;
+  onBehalfOfId: string | null;
+  employeeId: string;
+  ccEmails: string | null;
+  onBehalfEmail: string | null;
+  onBehalfEmployeeCode: string | null;
+  departmentId: string;
+  departmentName: string | null;
+  paymentModeId: string;
+  paymentModeName: string | null;
+  assignedL1ApproverId: string;
+  assignedL2ApproverId: string | null;
+  submittedAt: string;
+  hodActionAt: string | null;
+  financeActionAt: string | null;
+  rejectionReason: string | null;
+  isResubmissionAllowed: boolean;
+  createdAt: string;
+  updatedAt: string;
+  submitterName: string | null;
+  submitterEmail: string | null;
+  beneficiaryName: string | null;
+  beneficiaryEmail: string | null;
+  pettyCashBalance: number | null;
+  l1ApproverName: string | null;
+  l1ApproverEmail: string | null;
+  l2ApproverName: string | null;
+  l2ApproverEmail: string | null;
+  expenseBillNo: string | null;
+  expenseTransactionId: string | null;
+  expensePurpose: string | null;
+  expenseCategoryId: string | null;
+  expenseCategoryName: string | null;
+  expenseProductId: string | null;
+  expenseProductName: string | null;
+  expenseLocationId: string | null;
+  expenseLocationName: string | null;
+  expenseIsGstApplicable: boolean | null;
+  expenseGstNumber: string | null;
+  expenseTransactionDate: string | null;
+  expenseBasicAmount: number | null;
+  expenseCgstAmount: number | null;
+  expenseSgstAmount: number | null;
+  expenseIgstAmount: number | null;
+  expenseTotalAmount: number | null;
+  expenseCurrencyCode: string | null;
+  expenseVendorName: string | null;
+  expensePeopleInvolved: string | null;
+  expenseRemarks: string | null;
+  expenseReceiptFilePath: string | null;
+  expenseBankStatementFilePath: string | null;
+  advanceRequestedAmount: number | null;
+  advanceBudgetMonth: number | null;
+  advanceBudgetYear: number | null;
+  advanceExpectedUsageDate: string | null;
+  advancePurpose: string | null;
+  advanceProductId: string | null;
+  advanceProductName: string | null;
+  advanceLocationId: string | null;
+  advanceLocationName: string | null;
+  advanceRemarks: string | null;
+  advanceSupportingDocumentPath: string | null;
+};
+
 export type MyClaimRecord = {
   id: string;
   employeeId: string;
@@ -182,6 +251,31 @@ export type MyClaimListRecord = {
   submittedAt: string;
   hodActionDate: string | null;
   financeActionDate: string | null;
+  submitterEmail: string | null;
+  hodEmail: string | null;
+  financeEmail: string | null;
+};
+
+export type ClaimAuditActionType =
+  | "SUBMITTED"
+  | "L1_APPROVED"
+  | "L1_REJECTED"
+  | "L2_APPROVED"
+  | "L2_REJECTED"
+  | "L2_MARK_PAID";
+
+export type ClaimAuditLogRecord = {
+  id: string;
+  claimId: string;
+  actorId: string;
+  actorName: string | null;
+  actorEmail: string | null;
+  actionType: ClaimAuditActionType;
+  assignedToId: string | null;
+  assignedToName: string | null;
+  assignedToEmail: string | null;
+  remarks: string | null;
+  createdAt: string;
 };
 
 export type PendingApprovalListRecord = {
@@ -248,6 +342,17 @@ export type ClaimRepository = {
   createClaimWithDetail(
     payload: Record<string, unknown>,
   ): Promise<{ claimId: string | null; errorMessage: string | null }>;
+  createClaimAuditLog(input: {
+    claimId: string;
+    actorId: string;
+    actionType: ClaimAuditActionType;
+    assignedToId: string | null;
+    remarks: string | null;
+  }): Promise<{ errorMessage: string | null }>;
+  getClaimAuditLogs(claimId: string): Promise<{
+    data: ClaimAuditLogRecord[];
+    errorMessage: string | null;
+  }>;
   getClaimForFinanceEdit(claimId: string): Promise<{
     data: ClaimFinanceEditSnapshot | null;
     errorMessage: string | null;

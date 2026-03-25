@@ -5,8 +5,11 @@ import {
   mapCanonicalStatusToDbStatuses,
 } from "@/core/constants/statuses";
 import type {
+  ClaimAuditActionType,
+  ClaimAuditLogRecord,
   ClaimDepartmentApprovers,
   ClaimExportRecord,
+  ClaimFullExportRecord,
   ClaimDropdownOption,
   ClaimPaymentMode,
   ClaimsExportFetchScope,
@@ -86,6 +89,26 @@ type EnterpriseClaimsDashboardRow = {
   detail_type: "expense" | "advance";
   submission_type: "Self" | "On Behalf";
   created_at: string;
+  submitter_email: string | null;
+  hod_email: string | null;
+  finance_email: string | null;
+};
+
+type ClaimAuditLogActorRow = {
+  full_name: string | null;
+  email: string | null;
+};
+
+type ClaimAuditLogRow = {
+  id: string;
+  claim_id: string;
+  actor_id: string;
+  action_type: ClaimAuditActionType;
+  assigned_to_id: string | null;
+  remarks: string | null;
+  created_at: string;
+  actor: ClaimAuditLogActorRow | ClaimAuditLogActorRow[] | null;
+  assigned_to: ClaimAuditLogActorRow | ClaimAuditLogActorRow[] | null;
 };
 
 type DepartmentApproverRoleRow = {
@@ -181,6 +204,7 @@ type ClaimDetailRow = {
   on_behalf_email: string | null;
   status: DbClaimStatus;
   rejection_reason: string | null;
+  is_resubmission_allowed: boolean;
   submitted_at: string;
   department_id: string;
   payment_mode_id: string;
@@ -204,6 +228,8 @@ type FinanceApproverSelectionRow = {
   created_at: string;
 };
 
+type BulkProcessClaimsRpcResponse = number | string | null;
+
 type ClaimFinanceEditExpenseRow = {
   receipt_file_path: string | null;
 };
@@ -218,6 +244,97 @@ type ClaimFinanceEditRow = {
   submitted_by: string;
   expense_details: ClaimFinanceEditExpenseRow | ClaimFinanceEditExpenseRow[] | null;
   advance_details: ClaimFinanceEditAdvanceRow | ClaimFinanceEditAdvanceRow[] | null;
+};
+
+type ExportClaimUserRow = {
+  full_name: string | null;
+  email: string | null;
+};
+
+type ExportClaimFinanceApproverRow = {
+  approver_user: ExportClaimUserRow | ExportClaimUserRow[] | null;
+};
+
+type ExportClaimLookupRow = {
+  id: string;
+  name: string;
+};
+
+type ExportClaimExpenseRow = {
+  bill_no: string | null;
+  transaction_id: string | null;
+  purpose: string | null;
+  expense_category_id: string | null;
+  product_id: string | null;
+  location_id: string | null;
+  is_gst_applicable: boolean | null;
+  gst_number: string | null;
+  transaction_date: string | null;
+  basic_amount: number | string | null;
+  cgst_amount: number | string | null;
+  sgst_amount: number | string | null;
+  igst_amount: number | string | null;
+  total_amount: number | string | null;
+  currency_code: string | null;
+  vendor_name: string | null;
+  people_involved: string | null;
+  remarks: string | null;
+  receipt_file_path: string | null;
+  bank_statement_file_path: string | null;
+  master_expense_categories: ExportClaimLookupRow | ExportClaimLookupRow[] | null;
+  master_products: ExportClaimLookupRow | ExportClaimLookupRow[] | null;
+  master_locations: ExportClaimLookupRow | ExportClaimLookupRow[] | null;
+};
+
+type ExportClaimAdvanceRow = {
+  requested_amount: number | string | null;
+  budget_month: number | null;
+  budget_year: number | null;
+  expected_usage_date: string | null;
+  purpose: string | null;
+  product_id: string | null;
+  location_id: string | null;
+  remarks: string | null;
+  supporting_document_path: string | null;
+  master_products: ExportClaimLookupRow | ExportClaimLookupRow[] | null;
+  master_locations: ExportClaimLookupRow | ExportClaimLookupRow[] | null;
+};
+
+type ExportClaimRow = {
+  id: string;
+  status: DbClaimStatus;
+  submission_type: "Self" | "On Behalf";
+  detail_type: "expense" | "advance";
+  submitted_by: string;
+  on_behalf_of_id: string | null;
+  employee_id: string;
+  cc_emails: string | null;
+  on_behalf_email: string | null;
+  on_behalf_employee_code: string | null;
+  department_id: string;
+  payment_mode_id: string;
+  assigned_l1_approver_id: string;
+  assigned_l2_approver_id: string | null;
+  submitted_at: string;
+  hod_action_at: string | null;
+  finance_action_at: string | null;
+  rejection_reason: string | null;
+  is_resubmission_allowed: boolean;
+  created_at: string;
+  updated_at: string;
+  submitter_user: ExportClaimUserRow | ExportClaimUserRow[] | null;
+  beneficiary_user: ExportClaimUserRow | ExportClaimUserRow[] | null;
+  l1_approver_user: ExportClaimUserRow | ExportClaimUserRow[] | null;
+  l2_finance_approver: ExportClaimFinanceApproverRow | ExportClaimFinanceApproverRow[] | null;
+  master_departments: ExportClaimLookupRow | ExportClaimLookupRow[] | null;
+  master_payment_modes: ExportClaimLookupRow | ExportClaimLookupRow[] | null;
+  expense_details: ExportClaimExpenseRow | ExportClaimExpenseRow[] | null;
+  advance_details: ExportClaimAdvanceRow | ExportClaimAdvanceRow[] | null;
+};
+
+type ExportWalletBalanceRow = {
+  user_id: string;
+  petty_cash_balance: number | string | null;
 };
 
 function mapOptionRows(rows: ClaimOptionRow[] | null): ClaimDropdownOption[] {
@@ -265,6 +382,8 @@ const FINANCE_NON_REJECTED_VISIBLE_STATUSES: DbClaimStatus[] = [
   DB_CLAIM_STATUSES[2],
   DB_CLAIM_STATUSES[3],
 ];
+const L1_ACTIONABLE_STATUSES: DbClaimStatus[] = [DB_CLAIM_STATUSES[0]];
+const FINANCE_ACTIONABLE_STATUSES: DbClaimStatus[] = [DB_CLAIM_STATUSES[1], DB_CLAIM_STATUSES[2]];
 
 function toPostgrestInList(values: string[]): string {
   return `(${values.map((value) => `"${value.replace(/"/g, '\\"')}"`).join(",")})`;
@@ -647,6 +766,227 @@ export class SupabaseClaimRepository implements ClaimRepository {
     return { data: row.id, errorMessage: null };
   }
 
+  async getFinancePendingApprovalsCount(
+    userId: string,
+    filters?: GetMyClaimsFilters,
+  ): Promise<{ count: number; errorMessage: string | null }> {
+    const client = getServiceRoleSupabaseClient();
+    const normalizedStatuses = normalizeStatusFilter(filters?.status);
+    const { fromDate, toDate } = normalizeDateRange(filters);
+    const normalizedSearch = normalizeSearchInput(filters);
+
+    const financeApproversResult = await client
+      .from("master_finance_approvers")
+      .select("id")
+      .eq("user_id", userId)
+      .eq("is_active", true)
+      .limit(1);
+
+    if (financeApproversResult.error) {
+      return { count: 0, errorMessage: financeApproversResult.error.message };
+    }
+
+    if ((financeApproversResult.data ?? []).length === 0) {
+      return { count: 0, errorMessage: null };
+    }
+
+    let query = client
+      .from("vw_enterprise_claims_dashboard")
+      .select("claim_id", { count: "exact", head: true })
+      .in("status", FINANCE_ACTIONABLE_STATUSES);
+
+    query = applyEnterpriseDashboardFilters({
+      query,
+      filters,
+      normalizedStatuses,
+      fromDate,
+      toDate,
+      normalizedSearch,
+    });
+
+    const { count, error } = await query;
+
+    if (error) {
+      return { count: 0, errorMessage: error.message };
+    }
+
+    return { count: count ?? 0, errorMessage: null };
+  }
+
+  async getL1PendingApprovalsCount(
+    userId: string,
+    filters?: GetMyClaimsFilters,
+  ): Promise<{ count: number; errorMessage: string | null }> {
+    const client = getServiceRoleSupabaseClient();
+    const normalizedStatuses = normalizeStatusFilter(filters?.status);
+    const { fromDate, toDate } = normalizeDateRange(filters);
+    const dateColumn = filters?.dateTarget === "finance_closed" ? "updated_at" : "submitted_at";
+    const normalizedSearch = normalizeSearchInput(filters);
+
+    if (filters?.dateTarget === "finance_closed") {
+      return { count: 0, errorMessage: null };
+    }
+
+    let query = client
+      .from("claims")
+      .select("id, submitter_user:users!claims_submitted_by_fkey!inner(full_name)", {
+        count: "exact",
+        head: true,
+      })
+      .eq("assigned_l1_approver_id", userId)
+      .eq("is_active", true)
+      .in("status", L1_ACTIONABLE_STATUSES);
+
+    if (filters?.detailType) {
+      query = query.eq("detail_type", filters.detailType);
+    }
+
+    if (filters?.paymentModeId) {
+      query = query.eq("payment_mode_id", filters.paymentModeId);
+    }
+
+    if (filters?.submissionType) {
+      query = query.eq("submission_type", filters.submissionType);
+    }
+
+    if (normalizedStatuses.length > 0) {
+      const actionableStatuses = normalizedStatuses.filter((status) =>
+        L1_ACTIONABLE_STATUSES.includes(status),
+      );
+
+      if (actionableStatuses.length === 0) {
+        return { count: 0, errorMessage: null };
+      }
+
+      query = query.in("status", actionableStatuses);
+    }
+
+    if (fromDate) {
+      query = query.gte(dateColumn, `${fromDate}T00:00:00.000Z`);
+    }
+
+    if (toDate) {
+      query = query.lte(dateColumn, `${toDate}T23:59:59.999Z`);
+    }
+
+    if (normalizedSearch.query && normalizedSearch.field) {
+      if (normalizedSearch.field === "claim_id") {
+        query = query.eq("id", normalizedSearch.query);
+      }
+
+      if (normalizedSearch.field === "employee_name") {
+        query = query.ilike("submitter_user.full_name", `%${normalizedSearch.query}%`);
+      }
+
+      if (normalizedSearch.field === "employee_id") {
+        query = query.ilike("employee_id", `%${normalizedSearch.query}%`);
+      }
+    }
+
+    const { count, error } = await query;
+
+    if (error) {
+      return { count: 0, errorMessage: error.message };
+    }
+
+    return { count: count ?? 0, errorMessage: null };
+  }
+
+  async listFinancePendingApprovalIds(
+    userId: string,
+    filters?: GetMyClaimsFilters,
+  ): Promise<{ data: string[]; errorMessage: string | null }> {
+    const client = getServiceRoleSupabaseClient();
+    const normalizedStatuses = normalizeStatusFilter(filters?.status);
+    const { fromDate, toDate } = normalizeDateRange(filters);
+    const normalizedSearch = normalizeSearchInput(filters);
+
+    const financeApproversResult = await client
+      .from("master_finance_approvers")
+      .select("id")
+      .eq("user_id", userId)
+      .eq("is_active", true)
+      .limit(1);
+
+    if (financeApproversResult.error) {
+      return { data: [], errorMessage: financeApproversResult.error.message };
+    }
+
+    if ((financeApproversResult.data ?? []).length === 0) {
+      return { data: [], errorMessage: null };
+    }
+
+    const financeNonRejectedStatusesFilter = toPostgrestInList(
+      FINANCE_NON_REJECTED_VISIBLE_STATUSES,
+    );
+
+    let query = client
+      .from("vw_enterprise_claims_dashboard")
+      .select("claim_id")
+      .or(
+        `status.in.${financeNonRejectedStatusesFilter},and(status.eq.Rejected,assigned_l2_approver_id.not.is.null)`,
+      )
+      .order("created_at", { ascending: false })
+      .order("claim_id", { ascending: false });
+
+    query = applyEnterpriseDashboardFilters({
+      query,
+      filters,
+      normalizedStatuses,
+      fromDate,
+      toDate,
+      normalizedSearch,
+    });
+
+    const { data, error } = await query;
+
+    if (error) {
+      return { data: [], errorMessage: error.message };
+    }
+
+    return {
+      data: (data ?? []).map((row) => row.claim_id as string).filter((id) => id.length > 0),
+      errorMessage: null,
+    };
+  }
+
+  async bulkProcessClaims(input: {
+    claimIds: string[];
+    action: "L2_APPROVE" | "L2_REJECT" | "MARK_PAID";
+    actorUserId: string;
+    reason?: string;
+    allowResubmission?: boolean;
+  }): Promise<{ processedCount: number; errorMessage: string | null }> {
+    const client = getServiceRoleSupabaseClient();
+    const { data, error } = await client.rpc("bulk_process_claims", {
+      p_claim_ids: input.claimIds,
+      p_action: input.action,
+      p_actor_id: input.actorUserId,
+      p_reason: input.reason ?? null,
+      p_allow_resubmission: input.allowResubmission === true,
+    });
+
+    if (error) {
+      return { processedCount: 0, errorMessage: error.message };
+    }
+
+    if (data === null || data === undefined) {
+      return { processedCount: input.claimIds.length, errorMessage: null };
+    }
+
+    const raw = data as BulkProcessClaimsRpcResponse;
+    const parsed = typeof raw === "number" ? raw : typeof raw === "string" ? Number(raw) : 0;
+
+    if (!Number.isFinite(parsed)) {
+      return {
+        processedCount: 0,
+        errorMessage: "Bulk claim process RPC returned an invalid response.",
+      };
+    }
+
+    return { processedCount: parsed, errorMessage: null };
+  }
+
   async getClaimForL1Decision(claimId: string): Promise<{
     data: {
       id: string;
@@ -686,9 +1026,11 @@ export class SupabaseClaimRepository implements ClaimRepository {
 
   async updateClaimL1Decision(input: {
     claimId: string;
+    actorUserId: string;
     status: DbClaimStatus;
     assignedL2ApproverId: string | null;
     rejectionReason: string | null;
+    allowResubmission: boolean;
   }): Promise<{ errorMessage: string | null }> {
     const client = getServiceRoleSupabaseClient();
     const isL1TerminalStatus =
@@ -701,6 +1043,7 @@ export class SupabaseClaimRepository implements ClaimRepository {
         status: input.status,
         assigned_l2_approver_id: input.assignedL2ApproverId,
         rejection_reason: input.rejectionReason,
+        is_resubmission_allowed: input.allowResubmission,
         hod_action_at: isL1TerminalStatus ? new Date().toISOString() : null,
       })
       .eq("id", input.claimId)
@@ -708,6 +1051,71 @@ export class SupabaseClaimRepository implements ClaimRepository {
 
     if (error) {
       return { errorMessage: error.message };
+    }
+
+    if (input.status === DB_CLAIM_STATUSES[4] && input.allowResubmission) {
+      const [{ error: expenseDeactivateError }, { error: advanceDeactivateError }] =
+        await Promise.all([
+          client
+            .from("expense_details")
+            .update({ is_active: false })
+            .eq("claim_id", input.claimId)
+            .eq("is_active", true),
+          client
+            .from("advance_details")
+            .update({ is_active: false })
+            .eq("claim_id", input.claimId)
+            .eq("is_active", true),
+        ]);
+
+      if (expenseDeactivateError) {
+        return { errorMessage: expenseDeactivateError.message };
+      }
+
+      if (advanceDeactivateError) {
+        return { errorMessage: advanceDeactivateError.message };
+      }
+    }
+
+    const auditActionType: ClaimAuditActionType | null =
+      input.status === DB_CLAIM_STATUSES[1]
+        ? "L1_APPROVED"
+        : input.status === DB_CLAIM_STATUSES[4]
+          ? "L1_REJECTED"
+          : null;
+
+    if (auditActionType) {
+      let auditAssignedToId: string | null = null;
+
+      if (auditActionType === "L1_APPROVED" && input.assignedL2ApproverId) {
+        const financeApproverLookup = await client
+          .from("master_finance_approvers")
+          .select("user_id")
+          .eq("id", input.assignedL2ApproverId)
+          .eq("is_active", true)
+          .limit(1)
+          .maybeSingle();
+
+        if (financeApproverLookup.error) {
+          return { errorMessage: financeApproverLookup.error.message };
+        }
+
+        const financeApproverUserId =
+          (financeApproverLookup.data as { user_id: string } | null)?.user_id ?? null;
+        auditAssignedToId = financeApproverUserId;
+      }
+
+      const auditResult = await this.createClaimAuditLog({
+        claimId: input.claimId,
+        actorId: input.actorUserId,
+        actionType: auditActionType,
+        assignedToId: auditAssignedToId,
+        remarks: input.rejectionReason,
+      });
+
+      if (auditResult.errorMessage) {
+        return { errorMessage: auditResult.errorMessage };
+      }
     }
 
     return { errorMessage: null };
@@ -747,9 +1155,11 @@ export class SupabaseClaimRepository implements ClaimRepository {
 
   async updateClaimL2Decision(input: {
     claimId: string;
+    actorUserId: string;
     status: DbClaimStatus;
     assignedL2ApproverId: string | null;
     rejectionReason: string | null;
+    allowResubmission: boolean;
   }): Promise<{ errorMessage: string | null }> {
     const client = getServiceRoleSupabaseClient();
     const isFinanceTerminalStatus =
@@ -763,6 +1173,7 @@ export class SupabaseClaimRepository implements ClaimRepository {
         status: input.status,
         assigned_l2_approver_id: input.assignedL2ApproverId,
         rejection_reason: input.rejectionReason,
+        is_resubmission_allowed: input.allowResubmission,
         finance_action_at: isFinanceTerminalStatus ? new Date().toISOString() : null,
       })
       .eq("id", input.claimId)
@@ -772,10 +1183,55 @@ export class SupabaseClaimRepository implements ClaimRepository {
       return { errorMessage: error.message };
     }
 
+    if (input.status === DB_CLAIM_STATUSES[4] && input.allowResubmission) {
+      const [{ error: expenseDeactivateError }, { error: advanceDeactivateError }] =
+        await Promise.all([
+          client
+            .from("expense_details")
+            .update({ is_active: false })
+            .eq("claim_id", input.claimId)
+            .eq("is_active", true),
+          client
+            .from("advance_details")
+            .update({ is_active: false })
+            .eq("claim_id", input.claimId)
+            .eq("is_active", true),
+        ]);
+
+      if (expenseDeactivateError) {
+        return { errorMessage: expenseDeactivateError.message };
+      }
+
+      if (advanceDeactivateError) {
+        return { errorMessage: advanceDeactivateError.message };
+      }
+    }
+
     if (input.status === PAYMENT_DONE_CLOSED_STATUS) {
       const walletUpdateResult = await this.updateWalletTotalsForClosedClaim(input.claimId);
       if (walletUpdateResult.errorMessage) {
         return { errorMessage: walletUpdateResult.errorMessage };
+      }
+    }
+
+    const auditActionType: ClaimAuditActionType | null =
+      input.status === DB_CLAIM_STATUSES[2]
+        ? "L2_APPROVED"
+        : input.status === DB_CLAIM_STATUSES[4]
+          ? "L2_REJECTED"
+          : null;
+
+    if (auditActionType) {
+      const auditResult = await this.createClaimAuditLog({
+        claimId: input.claimId,
+        actorId: input.actorUserId,
+        actionType: auditActionType,
+        assignedToId: null,
+        remarks: input.rejectionReason,
+      });
+
+      if (auditResult.errorMessage) {
+        return { errorMessage: auditResult.errorMessage };
       }
     }
 
@@ -828,7 +1284,7 @@ export class SupabaseClaimRepository implements ClaimRepository {
     const { data, error } = await client
       .from("claims")
       .select(
-        "id, employee_id, submission_type, detail_type, on_behalf_email, status, rejection_reason, submitted_at, department_id, payment_mode_id, assigned_l1_approver_id, assigned_l2_approver_id, submitted_by, submitter_user:users!claims_submitted_by_fkey(full_name, email), master_departments(name), master_payment_modes(name), expense_details(bill_no, purpose, transaction_date, basic_amount, cgst_amount, sgst_amount, igst_amount, total_amount, vendor_name, product_id, remarks, receipt_file_path, bank_statement_file_path), advance_details(purpose, requested_amount, expected_usage_date, product_id, remarks, supporting_document_path)",
+        "id, employee_id, submission_type, detail_type, on_behalf_email, status, rejection_reason, is_resubmission_allowed, submitted_at, department_id, payment_mode_id, assigned_l1_approver_id, assigned_l2_approver_id, submitted_by, submitter_user:users!claims_submitted_by_fkey(full_name, email), master_departments(name), master_payment_modes(name), expense_details(bill_no, purpose, transaction_date, basic_amount, cgst_amount, sgst_amount, igst_amount, total_amount, vendor_name, product_id, remarks, receipt_file_path, bank_statement_file_path), advance_details(purpose, requested_amount, expected_usage_date, product_id, remarks, supporting_document_path)",
       )
       .eq("id", claimId)
       .eq("is_active", true)
@@ -1295,7 +1751,130 @@ export class SupabaseClaimRepository implements ClaimRepository {
       return { claimId: null, errorMessage: "Claim creation returned unexpected response." };
     }
 
+    const submittedEmployeeId =
+      typeof payload.employee_id === "string" ? payload.employee_id.trim() : "";
+    if (submittedEmployeeId.length > 0) {
+      const employeeIdPersistResult = await client
+        .from("claims")
+        .update({ employee_id: submittedEmployeeId })
+        .eq("id", data)
+        .eq("is_active", true);
+
+      if (employeeIdPersistResult.error) {
+        return {
+          claimId: null,
+          errorMessage: `Claim created but employee_id persistence failed: ${employeeIdPersistResult.error.message}`,
+        };
+      }
+    }
+
+    const actorId = typeof payload.submitted_by === "string" ? payload.submitted_by : null;
+    const assignedToId =
+      typeof payload.assigned_l1_approver_id === "string" ? payload.assigned_l1_approver_id : null;
+
+    if (!actorId) {
+      return { claimId: null, errorMessage: "Missing submitter for claim audit log creation." };
+    }
+
+    const auditResult = await this.createClaimAuditLog({
+      claimId: data,
+      actorId,
+      actionType: "SUBMITTED",
+      assignedToId,
+      remarks: null,
+    });
+
+    if (auditResult.errorMessage) {
+      return {
+        claimId: null,
+        errorMessage: `Claim created but audit logging failed: ${auditResult.errorMessage}`,
+      };
+    }
+
     return { claimId: data, errorMessage: null };
+  }
+
+  async createClaimAuditLog(input: {
+    claimId: string;
+    actorId: string;
+    actionType: ClaimAuditActionType;
+    assignedToId: string | null;
+    remarks: string | null;
+  }): Promise<{ errorMessage: string | null }> {
+    const client = getServiceRoleSupabaseClient();
+    const payload = {
+      claim_id: input.claimId,
+      actor_id: input.actorId,
+      action_type: input.actionType,
+      assigned_to_id: input.assignedToId,
+      remarks: input.remarks,
+    };
+
+    const { error } = await client.from("claim_audit_logs").insert(payload);
+
+    if (
+      error &&
+      input.assignedToId &&
+      /claim_audit_logs_assigned_to_id_fkey/i.test(error.message)
+    ) {
+      const fallback = await client.from("claim_audit_logs").insert({
+        ...payload,
+        assigned_to_id: null,
+      });
+
+      if (fallback.error) {
+        return { errorMessage: fallback.error.message };
+      }
+
+      return { errorMessage: null };
+    }
+
+    if (error) {
+      return { errorMessage: error.message };
+    }
+
+    return { errorMessage: null };
+  }
+
+  async getClaimAuditLogs(claimId: string): Promise<{
+    data: ClaimAuditLogRecord[];
+    errorMessage: string | null;
+  }> {
+    const client = getServiceRoleSupabaseClient();
+    const { data, error } = await client
+      .from("claim_audit_logs")
+      .select(
+        "id, claim_id, actor_id, action_type, assigned_to_id, remarks, created_at, actor:users!claim_audit_logs_actor_id_fkey(full_name, email), assigned_to:users!claim_audit_logs_assigned_to_id_fkey(full_name, email)",
+      )
+      .eq("claim_id", claimId)
+      .order("created_at", { ascending: true });
+
+    if (error) {
+      return { data: [], errorMessage: error.message };
+    }
+
+    const rows = (data ?? []) as ClaimAuditLogRow[];
+    return {
+      data: rows.map((row) => {
+        const actor = getSingleRelation(row.actor);
+        const assignedTo = getSingleRelation(row.assigned_to);
+
+        return {
+          id: row.id,
+          claimId: row.claim_id,
+          actorId: row.actor_id,
+          actorName: actor?.full_name ?? null,
+          actorEmail: actor?.email ?? null,
+          actionType: row.action_type,
+          assignedToId: row.assigned_to_id,
+          assignedToName: assignedTo?.full_name ?? null,
+          assignedToEmail: assignedTo?.email ?? null,
+          remarks: row.remarks,
+          createdAt: row.created_at,
+        };
+      }),
+      errorMessage: null,
+    };
   }
 
   async getMyClaims(
@@ -1411,6 +1990,9 @@ export class SupabaseClaimRepository implements ClaimRepository {
       submittedAt: string;
       hodActionDate: string | null;
       financeActionDate: string | null;
+      submitterEmail: string | null;
+      hodEmail: string | null;
+      financeEmail: string | null;
     }>;
     nextCursor: string | null;
     hasNextPage: boolean;
@@ -1434,7 +2016,7 @@ export class SupabaseClaimRepository implements ClaimRepository {
     let query = client
       .from("vw_enterprise_claims_dashboard")
       .select(
-        "claim_id, employee_name, employee_id, department_name, type_of_claim, amount, status, submitted_on, hod_action_date, finance_action_date, submitted_by, on_behalf_of_id, department_id, payment_mode_id, detail_type, submission_type, created_at",
+        "claim_id, employee_name, employee_id, department_name, type_of_claim, amount, status, submitted_on, hod_action_date, finance_action_date, submitted_by, on_behalf_of_id, department_id, payment_mode_id, detail_type, submission_type, created_at, submitter_email, hod_email, finance_email",
       )
       .or(
         decodedCursor
@@ -1484,6 +2066,9 @@ export class SupabaseClaimRepository implements ClaimRepository {
       submittedAt: row.submitted_on,
       hodActionDate: row.hod_action_date,
       financeActionDate: row.finance_action_date,
+      submitterEmail: row.submitter_email,
+      hodEmail: row.hod_email,
+      financeEmail: row.finance_email,
     }));
 
     return {
@@ -1884,6 +2469,244 @@ export class SupabaseClaimRepository implements ClaimRepository {
         hodActionDate: row.hod_action_date,
         financeActionDate: row.finance_action_date,
       })),
+      errorMessage: null,
+    };
+  }
+
+  async getClaimsForFullExport(input: {
+    userId: string;
+    fetchScope: ClaimsExportFetchScope;
+    filters?: GetMyClaimsFilters;
+    limit: number;
+    offset: number;
+  }): Promise<{ data: ClaimFullExportRecord[]; errorMessage: string | null }> {
+    const client = getServiceRoleSupabaseClient();
+    const normalizedStatuses = normalizeStatusFilter(input.filters?.status);
+    const { fromDate, toDate } = normalizeDateRange(input.filters);
+    const normalizedSearch = normalizeSearchInput(input.filters);
+
+    let financeApproverIds: string[] = [];
+
+    if (input.fetchScope === "finance_approvals") {
+      const financeApproversResult = await client
+        .from("master_finance_approvers")
+        .select("id")
+        .eq("user_id", input.userId)
+        .eq("is_active", true)
+        .limit(1);
+
+      if (financeApproversResult.error) {
+        return {
+          data: [],
+          errorMessage: financeApproversResult.error.message,
+        };
+      }
+
+      financeApproverIds = (financeApproversResult.data ?? []).map((row) => row.id as string);
+
+      if (financeApproverIds.length === 0) {
+        return { data: [], errorMessage: null };
+      }
+    }
+
+    let idsQuery = client
+      .from("vw_enterprise_claims_dashboard")
+      .select("claim_id, created_at")
+      .order("created_at", { ascending: false })
+      .order("claim_id", { ascending: false });
+
+    if (input.fetchScope === "submissions") {
+      idsQuery = idsQuery.or(buildMyClaimsOwnershipOrFilter(input.userId));
+    }
+
+    if (input.fetchScope === "l1_approvals") {
+      idsQuery = idsQuery.eq("assigned_l1_approver_id", input.userId);
+    }
+
+    if (input.fetchScope === "finance_approvals") {
+      const financeNonRejectedStatusesFilter = toPostgrestInList(
+        FINANCE_NON_REJECTED_VISIBLE_STATUSES,
+      );
+
+      idsQuery = idsQuery.or(
+        `status.in.${financeNonRejectedStatusesFilter},and(status.eq.Rejected,assigned_l2_approver_id.not.is.null)`,
+      );
+    }
+
+    idsQuery = applyEnterpriseDashboardFilters({
+      query: idsQuery,
+      filters: input.filters,
+      normalizedStatuses,
+      fromDate,
+      toDate,
+      normalizedSearch,
+    });
+
+    const { data: idData, error: idError } = await idsQuery.range(
+      input.offset,
+      input.offset + input.limit - 1,
+    );
+
+    if (idError) {
+      return {
+        data: [],
+        errorMessage: idError.message,
+      };
+    }
+
+    const orderedClaimIds = (idData ?? []).map((row) =>
+      String((row as { claim_id: string }).claim_id),
+    );
+
+    if (orderedClaimIds.length === 0) {
+      return {
+        data: [],
+        errorMessage: null,
+      };
+    }
+
+    const { data, error } = await client
+      .from("claims")
+      .select(
+        "id, status, submission_type, detail_type, submitted_by, on_behalf_of_id, employee_id, cc_emails, on_behalf_email, on_behalf_employee_code, department_id, payment_mode_id, assigned_l1_approver_id, assigned_l2_approver_id, submitted_at, hod_action_at, finance_action_at, rejection_reason, is_resubmission_allowed, created_at, updated_at, submitter_user:users!claims_submitted_by_fkey(full_name, email), beneficiary_user:users!claims_on_behalf_of_id_fkey(full_name, email), l1_approver_user:users!claims_assigned_l1_approver_id_fkey(full_name, email), l2_finance_approver:master_finance_approvers!claims_assigned_l2_approver_id_fkey(approver_user:users!master_finance_approvers_user_id_fkey(full_name, email)), master_departments(id, name), master_payment_modes(id, name), expense_details(bill_no, transaction_id, purpose, expense_category_id, product_id, location_id, is_gst_applicable, gst_number, transaction_date, basic_amount, cgst_amount, sgst_amount, igst_amount, total_amount, currency_code, vendor_name, people_involved, remarks, receipt_file_path, bank_statement_file_path, master_expense_categories(id, name), master_products(id, name), master_locations(id, name)), advance_details(requested_amount, budget_month, budget_year, expected_usage_date, purpose, product_id, location_id, remarks, supporting_document_path, master_products(id, name), master_locations(id, name))",
+      )
+      .in("id", orderedClaimIds)
+      .eq("is_active", true);
+
+    if (error) {
+      return {
+        data: [],
+        errorMessage: error.message,
+      };
+    }
+
+    const rows = (data ?? []) as ExportClaimRow[];
+    const rowById = new Map(rows.map((row) => [row.id, row]));
+    const walletUserIds = Array.from(
+      new Set(rows.map((row) => row.on_behalf_of_id ?? row.submitted_by).filter(Boolean)),
+    );
+    const walletBalanceByUserId = new Map<string, number | null>();
+
+    if (walletUserIds.length > 0) {
+      const { data: walletRows, error: walletError } = await client
+        .from("wallets")
+        .select("user_id, petty_cash_balance")
+        .in("user_id", walletUserIds);
+
+      if (walletError) {
+        return {
+          data: [],
+          errorMessage: walletError.message,
+        };
+      }
+
+      for (const walletRow of (walletRows ?? []) as ExportWalletBalanceRow[]) {
+        walletBalanceByUserId.set(walletRow.user_id, toNumber(walletRow.petty_cash_balance));
+      }
+    }
+
+    return {
+      data: orderedClaimIds
+        .map((id) => rowById.get(id))
+        .filter((row): row is ExportClaimRow => Boolean(row))
+        .map((row) => {
+          const walletUserId = row.on_behalf_of_id ?? row.submitted_by;
+          const submitter = getSingleRelation(row.submitter_user);
+          const beneficiary = getSingleRelation(row.beneficiary_user);
+          const l1Approver = getSingleRelation(row.l1_approver_user);
+          const l2FinanceApprover = getSingleRelation(row.l2_finance_approver);
+          const l2Approver = getSingleRelation(l2FinanceApprover?.approver_user);
+          const department = getSingleRelation(row.master_departments);
+          const paymentMode = getSingleRelation(row.master_payment_modes);
+          const expense = getSingleRelation(row.expense_details);
+          const advance = getSingleRelation(row.advance_details);
+          const expenseCategory = getSingleRelation(expense?.master_expense_categories);
+          const expenseProduct = getSingleRelation(expense?.master_products);
+          const expenseLocation = getSingleRelation(expense?.master_locations);
+          const advanceProduct = getSingleRelation(advance?.master_products);
+          const advanceLocation = getSingleRelation(advance?.master_locations);
+
+          return {
+            claimId: row.id,
+            status: row.status,
+            submissionType: row.submission_type,
+            detailType: row.detail_type,
+            submittedBy: row.submitted_by,
+            onBehalfOfId: row.on_behalf_of_id,
+            employeeId: row.employee_id,
+            ccEmails: row.cc_emails,
+            onBehalfEmail: row.on_behalf_email,
+            onBehalfEmployeeCode: row.on_behalf_employee_code,
+            departmentId: row.department_id,
+            departmentName: department?.name ?? null,
+            paymentModeId: row.payment_mode_id,
+            paymentModeName: paymentMode?.name ?? null,
+            assignedL1ApproverId: row.assigned_l1_approver_id,
+            assignedL2ApproverId: row.assigned_l2_approver_id,
+            submittedAt: row.submitted_at,
+            hodActionAt: row.hod_action_at,
+            financeActionAt: row.finance_action_at,
+            rejectionReason: row.rejection_reason,
+            isResubmissionAllowed: row.is_resubmission_allowed,
+            createdAt: row.created_at,
+            updatedAt: row.updated_at,
+            submitterName: submitter?.full_name ?? null,
+            submitterEmail: submitter?.email ?? null,
+            beneficiaryName: beneficiary?.full_name ?? null,
+            beneficiaryEmail: beneficiary?.email ?? null,
+            pettyCashBalance: walletBalanceByUserId.get(walletUserId) ?? null,
+            l1ApproverName: l1Approver?.full_name ?? null,
+            l1ApproverEmail: l1Approver?.email ?? null,
+            l2ApproverName: l2Approver?.full_name ?? null,
+            l2ApproverEmail: l2Approver?.email ?? null,
+            expenseBillNo: expense?.bill_no ?? null,
+            expenseTransactionId: expense?.transaction_id ?? null,
+            expensePurpose: expense?.purpose ?? null,
+            expenseCategoryId: expense?.expense_category_id ?? null,
+            expenseCategoryName: expenseCategory?.name ?? null,
+            expenseProductId: expense?.product_id ?? null,
+            expenseProductName: expenseProduct?.name ?? null,
+            expenseLocationId: expense?.location_id ?? null,
+            expenseLocationName: expenseLocation?.name ?? null,
+            expenseIsGstApplicable: expense?.is_gst_applicable ?? null,
+            expenseGstNumber: expense?.gst_number ?? null,
+            expenseTransactionDate: expense?.transaction_date ?? null,
+            expenseBasicAmount: toNumber(expense?.basic_amount),
+            expenseCgstAmount: toNumber(expense?.cgst_amount),
+            expenseSgstAmount: toNumber(expense?.sgst_amount),
+            expenseIgstAmount: toNumber(expense?.igst_amount),
+            expenseTotalAmount: toNumber(expense?.total_amount),
+            expenseCurrencyCode: expense?.currency_code ?? null,
+            expenseVendorName: expense?.vendor_name ?? null,
+            expensePeopleInvolved: expense?.people_involved ?? null,
+            expenseRemarks: expense?.remarks ?? null,
+            expenseReceiptFilePath: expense?.receipt_file_path ?? null,
+            expenseBankStatementFilePath: expense?.bank_statement_file_path ?? null,
+            advanceRequestedAmount: toNumber(advance?.requested_amount),
+            advanceBudgetMonth: advance?.budget_month ?? null,
+            advanceBudgetYear: advance?.budget_year ?? null,
+            advanceExpectedUsageDate: advance?.expected_usage_date ?? null,
+            advancePurpose: advance?.purpose ?? null,
+            advanceProductId: advance?.product_id ?? null,
+            advanceProductName: advanceProduct?.name ?? null,
+            advanceLocationId: advance?.location_id ?? null,
+            advanceLocationName: advanceLocation?.name ?? null,
+            advanceRemarks: advance?.remarks ?? null,
+            advanceSupportingDocumentPath: advance?.supporting_document_path ?? null,
+          } satisfies ClaimFullExportRecord;
+        }),
+      errorMessage: null,
+    };
+  }
+
+  async getClaimEvidencePublicUrl(input: {
+    filePath: string;
+  }): Promise<{ data: string | null; errorMessage: string | null }> {
+    const client = getServiceRoleSupabaseClient();
+    const { data } = client.storage.from("claims").getPublicUrl(input.filePath);
+
+    return {
+      data: data.publicUrl ?? null,
       errorMessage: null,
     };
   }

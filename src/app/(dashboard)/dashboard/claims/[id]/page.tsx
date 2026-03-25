@@ -18,6 +18,7 @@ import { ClaimRejectWithReasonForm } from "@/modules/claims/ui/claim-reject-with
 import { ClaimDecisionActionForm } from "@/modules/claims/ui/claim-decision-action-form";
 import { ClaimStatusBadge } from "@/modules/claims/ui/claim-status-badge";
 import { FinanceEditClaimForm } from "@/modules/claims/ui/finance-edit-claim-form";
+import { ClaimAuditTimeline } from "@/modules/claims/ui/claim-audit-timeline";
 
 type PageProps = {
   params: Promise<{ id: string }>;
@@ -155,15 +156,20 @@ export default async function ClaimDetailPage({ params, searchParams }: PageProp
   }
 
   const claim = claimResult.data;
+  const claimAuditLogsResult = await claimRepository.getClaimAuditLogs(claim.id);
+  const claimAuditLogs = claimAuditLogsResult.errorMessage ? [] : claimAuditLogsResult.data;
   const currentUserId = currentUserResult.user.id;
   const financeApproverIdsResult =
     await claimRepository.getFinanceApproverIdsForUser(currentUserId);
   const isFinanceActor =
     !financeApproverIdsResult.errorMessage && financeApproverIdsResult.data.length > 0;
+  const isAssignedL1Approver = currentUserId === claim.assignedL1ApproverId;
+  const isAssignedL2Approver = currentUserId === claim.assignedL2ApproverId;
   const canViewAsFinance = isFinanceActor && claim.status !== DB_CLAIM_STATUSES[0];
   const canView =
     currentUserId === claim.submittedBy ||
-    currentUserId === claim.assignedL1ApproverId ||
+    isAssignedL1Approver ||
+    isAssignedL2Approver ||
     canViewAsFinance;
   const canEditByFinance = isFinanceActor;
 
@@ -171,11 +177,11 @@ export default async function ClaimDetailPage({ params, searchParams }: PageProp
     notFound();
   }
 
-  const canTakeL1Decision =
-    currentUserId === claim.assignedL1ApproverId && claim.status === DB_CLAIM_STATUSES[0];
+  const canTakeL1Decision = isAssignedL1Approver && claim.status === DB_CLAIM_STATUSES[0];
   const canTakeFinanceAuthorizationDecision =
-    canViewAsFinance && claim.status === DB_CLAIM_STATUSES[1];
-  const canTakeFinanceExecutionDecision = canViewAsFinance && claim.status === DB_CLAIM_STATUSES[2];
+    isAssignedL2Approver && claim.status === DB_CLAIM_STATUSES[1];
+  const canTakeFinanceExecutionDecision =
+    isAssignedL2Approver && claim.status === DB_CLAIM_STATUSES[2];
   const canTakeDecision =
     canTakeL1Decision || canTakeFinanceAuthorizationDecision || canTakeFinanceExecutionDecision;
   const productsResult = canEditByFinance
@@ -203,7 +209,13 @@ export default async function ClaimDetailPage({ params, searchParams }: PageProp
   const rejectFromDetail = async (formData: FormData) => {
     "use server";
     const rejectionReason = String(formData.get("rejectionReason") ?? "").trim();
-    await rejectClaimAction({ claimId: claim.id, redirectToApprovalsView: true, rejectionReason });
+    const allowResubmission = formData.get("allowResubmission") === "true";
+    await rejectClaimAction({
+      claimId: claim.id,
+      redirectToApprovalsView: true,
+      rejectionReason,
+      allowResubmission,
+    });
   };
 
   const approveFinanceFromDetail = async () => {
@@ -214,10 +226,12 @@ export default async function ClaimDetailPage({ params, searchParams }: PageProp
   const rejectFinanceFromDetail = async (formData: FormData) => {
     "use server";
     const rejectionReason = String(formData.get("rejectionReason") ?? "").trim();
+    const allowResubmission = formData.get("allowResubmission") === "true";
     await rejectFinanceAction({
       claimId: claim.id,
       redirectToApprovalsView: true,
       rejectionReason,
+      allowResubmission,
     });
   };
 
@@ -470,6 +484,15 @@ export default async function ClaimDetailPage({ params, searchParams }: PageProp
             >
               Back to My Claims approvals
             </Link>
+          </div>
+
+          <div className="mt-6">
+            <ClaimAuditTimeline logs={claimAuditLogs} />
+            {claimAuditLogsResult.errorMessage ? (
+              <p className="mt-2 text-xs text-rose-600 dark:text-rose-300">
+                Unable to load complete audit history. {claimAuditLogsResult.errorMessage}
+              </p>
+            ) : null}
           </div>
         </section>
 

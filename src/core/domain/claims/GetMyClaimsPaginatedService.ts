@@ -12,6 +12,9 @@ type MyClaimsPaginatedRecord = {
   submittedAt: string;
   hodActionDate: string | null;
   financeActionDate: string | null;
+  submitterEmail: string | null;
+  hodEmail: string | null;
+  financeEmail: string | null;
 };
 
 type PaginatedClaimsRepository = {

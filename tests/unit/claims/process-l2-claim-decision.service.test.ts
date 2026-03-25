@@ -50,9 +50,11 @@ describe("ProcessL2ClaimDecisionService", () => {
     expect(result).toEqual({ ok: true, errorMessage: null });
     expect(repository.updateClaimL2Decision).toHaveBeenCalledWith({
       claimId: "claim-1",
+      actorUserId: "finance-1",
       status: "Finance Approved - Payment under process",
       assignedL2ApproverId: "finance-approver-id-1",
       rejectionReason: null,
+      allowResubmission: false,
     });
   });
 
@@ -70,9 +72,33 @@ describe("ProcessL2ClaimDecisionService", () => {
     expect(result).toEqual({ ok: true, errorMessage: null });
     expect(repository.updateClaimL2Decision).toHaveBeenCalledWith({
       claimId: "claim-1",
+      actorUserId: "finance-1",
       status: "Rejected",
       assignedL2ApproverId: "finance-approver-id-1",
       rejectionReason: "Insufficient documentation.",
+      allowResubmission: false,
+    });
+  });
+
+  test("passes allowResubmission when finance rejects", async () => {
+    const repository = createRepository();
+    const service = new ProcessL2ClaimDecisionService({ repository, logger: createLogger() });
+
+    await service.execute({
+      claimId: "claim-1",
+      actorUserId: "finance-1",
+      decision: "reject",
+      rejectionReason: "Insufficient documentation.",
+      allowResubmission: true,
+    });
+
+    expect(repository.updateClaimL2Decision).toHaveBeenCalledWith({
+      claimId: "claim-1",
+      actorUserId: "finance-1",
+      status: "Rejected",
+      assignedL2ApproverId: "finance-approver-id-1",
+      rejectionReason: "Insufficient documentation.",
+      allowResubmission: true,
     });
   });
 
@@ -98,9 +124,11 @@ describe("ProcessL2ClaimDecisionService", () => {
     expect(result).toEqual({ ok: true, errorMessage: null });
     expect(repository.updateClaimL2Decision).toHaveBeenCalledWith({
       claimId: "claim-1",
+      actorUserId: "finance-1",
       status: "Payment Done - Closed",
       assignedL2ApproverId: "finance-approver-id-1",
       rejectionReason: null,
+      allowResubmission: false,
     });
   });
 

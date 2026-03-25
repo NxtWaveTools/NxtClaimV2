@@ -1,10 +1,12 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { Suspense } from "react";
 import { BackButton } from "@/components/ui/back-button";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { ROUTES } from "@/core/config/route-registry";
 import { DB_CLAIM_STATUSES, type DbClaimStatus } from "@/core/constants/statuses";
 import type {
+  ClaimAuditLogRecord,
   ClaimDateTarget,
   ClaimSearchField,
   ClaimSubmissionType,
@@ -26,13 +28,13 @@ import { ClaimDecisionActionForm } from "@/modules/claims/ui/claim-decision-acti
 import { ClaimRejectWithReasonForm } from "@/modules/claims/ui/claim-reject-with-reason-form";
 import { ClaimStatusBadge } from "@/modules/claims/ui/claim-status-badge";
 import { ClaimsFilterBar } from "@/modules/claims/ui/claims-filter-bar";
-import { ClaimsTableSkeleton } from "@/modules/claims/ui/claims-table-skeleton";
+import { FinanceApprovalsBulkTable } from "@/modules/claims/ui/finance-approvals-bulk-table";
 import { MyClaimsPaginationControls } from "@/modules/claims/ui/my-claims-pagination-controls";
-import { ApprovalsQuickViewSheet } from "@/modules/claims/ui/approvals-quick-view-sheet";
+import { ApprovalsAuditModeDialog } from "@/modules/claims/ui/approvals-quick-view-sheet";
 import { ClaimSemanticDownloadButton } from "@/modules/claims/ui/claim-semantic-download-button";
+import { TableSkeleton } from "@/components/ui/table-skeleton";
 
 const PAGE_SIZE = 10;
-
 type SearchParamsValue = string | string[] | undefined;
 type ViewMode = "submissions" | "approvals";
 
@@ -63,6 +65,10 @@ function toSearchParams(searchParams?: Record<string, SearchParamsValue>): URLSe
 function resolveView(value: string | undefined, canViewApprovals: boolean): ViewMode {
   if (value === "approvals" && canViewApprovals) {
     return "approvals";
+  }
+
+  if (value === "submissions") {
+    return "submissions";
   }
 
   return "submissions";
@@ -212,6 +218,25 @@ function formatAmount(amount: number): string {
   }).format(amount);
 }
 
+function DateWithActor({
+  dateValue,
+  actorEmail,
+}: {
+  dateValue: string | null;
+  actorEmail: string | null;
+}) {
+  if (!dateValue && !actorEmail) {
+    return <span>-</span>;
+  }
+
+  return (
+    <div className="flex flex-col">
+      <span>{formatDate(dateValue)}</span>
+      <span className="text-xs text-muted-foreground">{actorEmail ?? "-"}</span>
+    </div>
+  );
+}
+
 function isRenderableEvidencePath(path: string | null): path is string {
   return Boolean(path && path.trim() !== "" && path !== "N/A");
 }
@@ -299,6 +324,25 @@ async function resolveApprovalEvidenceUrls(
   return Object.fromEntries(signedEntries);
 }
 
+async function resolveAuditLogsByClaimId(
+  claimRepository: SupabaseClaimRepository,
+  claimIds: string[],
+): Promise<Record<string, ClaimAuditLogRecord[]>> {
+  const entries = await Promise.all(
+    claimIds.map(async (claimId) => {
+      const result = await claimRepository.getClaimAuditLogs(claimId);
+
+      if (result.errorMessage) {
+        return [claimId, []] as const;
+      }
+
+      return [claimId, result.data] as const;
+    }),
+  );
+
+  return Object.fromEntries(entries);
+}
+
 function resolveApprovalActionMode(params: {
   activeScope: "l1" | "finance" | null;
   status: DbClaimStatus;
@@ -376,7 +420,90 @@ async function ClaimsCommandCenterTable({
     });
 
     const rows = approvalsResult.data;
+
+    if (approvalScope === "finance" || approvalScope === "l1") {
+      const totalCount =
+        approvalScope === "finance"
+          ? claimRepository.getFinancePendingApprovalsCount(userId, filters)
+          : claimRepository.getL1PendingApprovalsCount(userId, filters);
+
+      const resolvedTotalCount = await totalCount;
+      const evidenceSignedUrlByClaimId = await resolveApprovalEvidenceUrls(claimRepository, rows);
+      const auditLogsByClaimId = await resolveAuditLogsByClaimId(
+        claimRepository,
+        rows.map((claim) => claim.id),
+      );
+
+      return (
+        <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition-colors dark:border-slate-800 dark:bg-zinc-950">
+          {approvalsResult.errorMessage ? (
+            <div className="px-4 py-6">
+              <p className="rounded-xl bg-rose-50 px-3 py-2 text-sm text-rose-700 dark:bg-rose-950/40 dark:text-rose-200">
+                Unable to load approvals history. {approvalsResult.errorMessage}
+              </p>
+            </div>
+          ) : rows.length === 0 ? (
+            <>
+              <div className="grid place-items-center px-4 py-14 text-center">
+                <p className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                  No approvals history found.
+                </p>
+                <p className="mt-1 text-xs text-slate-500 dark:text-slate-500">
+                  Claims routed to your approval scope will appear here.
+                </p>
+              </div>
+            </>
+          ) : (
+            <>
+              <FinanceApprovalsBulkTable
+                rows={rows.map((claim) => ({
+                  id: claim.id,
+                  employeeId: claim.employeeId,
+                  submitter: claim.submitter,
+                  departmentName: claim.departmentName,
+                  paymentModeName: claim.paymentModeName,
+                  detailType: claim.detailType,
+                  submissionType: claim.submissionType,
+                  onBehalfEmail: claim.onBehalfEmail,
+                  purpose: claim.purpose,
+                  categoryName: claim.categoryName,
+                  expenseReceiptFilePath: claim.expenseReceiptFilePath,
+                  expenseBankStatementFilePath: claim.expenseBankStatementFilePath,
+                  advanceSupportingDocumentPath: claim.advanceSupportingDocumentPath,
+                  totalAmount: claim.totalAmount,
+                  status: claim.status,
+                  submittedAt: claim.submittedAt,
+                  hodActionDate: null,
+                  financeActionDate: null,
+                }))}
+                totalSelectableCount={
+                  resolvedTotalCount.errorMessage ? rows.length : resolvedTotalCount.count
+                }
+                filters={filters}
+                approvalScope={approvalScope}
+                evidenceSignedUrlByClaimId={evidenceSignedUrlByClaimId}
+                auditLogsByClaimId={auditLogsByClaimId}
+              />
+
+              <MyClaimsPaginationControls
+                hasNextPage={approvalsResult.hasNextPage}
+                hasPreviousPage={Boolean(previousCursorToken)}
+                currentCursor={cursor}
+                nextCursor={approvalsResult.nextCursor}
+                previousCursor={previousCursorToken}
+                searchParams={searchParams}
+              />
+            </>
+          )}
+        </section>
+      );
+    }
+
     const evidenceSignedUrlByClaimId = await resolveApprovalEvidenceUrls(claimRepository, rows);
+    const auditLogsByClaimId = await resolveAuditLogsByClaimId(
+      claimRepository,
+      rows.map((claim) => claim.id),
+    );
     const gatedStatuses = {
       l1: DB_CLAIM_STATUSES[0],
       finance: DB_CLAIM_STATUSES[1],
@@ -385,9 +512,12 @@ async function ClaimsCommandCenterTable({
     return (
       <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition-colors dark:border-slate-800 dark:bg-zinc-950">
         <div className="border-b border-slate-200 px-4 py-3 dark:border-slate-800">
-          <h2 className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-700 dark:text-slate-300">
+          <p
+            aria-hidden="true"
+            className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-700 dark:text-slate-300"
+          >
             Approvals History
-          </h2>
+          </p>
         </div>
 
         {approvalsResult.errorMessage ? (
@@ -432,7 +562,12 @@ async function ClaimsCommandCenterTable({
                     const rejectFromList = async (formData: FormData) => {
                       "use server";
                       const rejectionReason = String(formData.get("rejectionReason") ?? "").trim();
-                      await rejectClaimAction({ claimId: claim.id, rejectionReason });
+                      const allowResubmission = formData.get("allowResubmission") === "true";
+                      await rejectClaimAction({
+                        claimId: claim.id,
+                        rejectionReason,
+                        allowResubmission,
+                      });
                     };
 
                     const approveFinanceFromList = async () => {
@@ -443,7 +578,12 @@ async function ClaimsCommandCenterTable({
                     const rejectFinanceFromList = async (formData: FormData) => {
                       "use server";
                       const rejectionReason = String(formData.get("rejectionReason") ?? "").trim();
-                      await rejectFinanceAction({ claimId: claim.id, rejectionReason });
+                      const allowResubmission = formData.get("allowResubmission") === "true";
+                      await rejectFinanceAction({
+                        claimId: claim.id,
+                        rejectionReason,
+                        allowResubmission,
+                      });
                     };
 
                     const markPaidFromList = async () => {
@@ -580,7 +720,7 @@ async function ClaimsCommandCenterTable({
                                 compact
                               />
                             ) : null}
-                            <ApprovalsQuickViewSheet
+                            <ApprovalsAuditModeDialog
                               claimId={claim.id}
                               detailType={claim.detailType}
                               submitter={claim.submitter}
@@ -599,9 +739,10 @@ async function ClaimsCommandCenterTable({
                               advanceSupportingDocumentSignedUrl={
                                 evidenceSignedUrls.advanceSupportingDocumentSignedUrl
                               }
+                              auditLogs={auditLogsByClaimId[claim.id] ?? []}
                             >
                               {renderActions(false)}
-                            </ApprovalsQuickViewSheet>
+                            </ApprovalsAuditModeDialog>
                             {renderActions(true)}
                           </div>
                         </td>
@@ -634,6 +775,30 @@ async function ClaimsCommandCenterTable({
   });
 
   const rows = claimsResult.data;
+  const submissionDetailEntries = await Promise.all(
+    rows.map(async (claim) => {
+      const detailResult = await claimRepository.getClaimDetailById(claim.id);
+      return [claim.id, detailResult.data] as const;
+    }),
+  );
+  const submissionDetailsByClaimId = Object.fromEntries(submissionDetailEntries);
+  const submissionEvidenceSignedUrlByClaimId = await resolveApprovalEvidenceUrls(
+    claimRepository,
+    rows.map((claim) => {
+      const detail = submissionDetailsByClaimId[claim.id];
+
+      return {
+        id: claim.id,
+        expenseReceiptFilePath: detail?.expense?.receiptFilePath ?? null,
+        expenseBankStatementFilePath: detail?.expense?.bankStatementFilePath ?? null,
+        advanceSupportingDocumentPath: detail?.advance?.supportingDocumentPath ?? null,
+      };
+    }),
+  );
+  const submissionAuditLogsByClaimId = await resolveAuditLogsByClaimId(
+    claimRepository,
+    rows.map((claim) => claim.id),
+  );
 
   return (
     <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition-colors dark:border-slate-800 dark:bg-zinc-950">
@@ -660,52 +825,114 @@ async function ClaimsCommandCenterTable({
         <>
           <div className="overflow-x-auto">
             <table className="min-w-[1500px] divide-y divide-slate-200 text-left text-sm dark:divide-slate-800">
-              <TableHeader showActions={false} />
+              <TableHeader showActions />
               <tbody className="divide-y divide-slate-100 bg-white text-slate-700 dark:divide-slate-900 dark:bg-zinc-950 dark:text-slate-300">
-                {rows.map((claim) => (
-                  <tr
-                    key={claim.id}
-                    className="transition-colors hover:bg-slate-50/70 dark:hover:bg-slate-900/40"
-                  >
-                    <td className="px-4 py-3 font-medium text-slate-900 dark:text-slate-100">
-                      <Link
-                        href={ROUTES.claims.detail(claim.id)}
-                        className="text-indigo-500 hover:text-indigo-400 hover:underline"
-                      >
-                        {claim.id}
-                      </Link>
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className="inline-block max-w-[180px] truncate align-bottom">
-                        {claim.employeeId}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className="inline-block max-w-[220px] truncate align-bottom">
-                        {claim.employeeName}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className="inline-block max-w-[200px] truncate align-bottom">
-                        {claim.departmentName}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className="inline-block max-w-[220px] truncate align-bottom">
-                        {claim.typeOfClaim}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 font-semibold text-slate-900 dark:text-slate-100">
-                      {formatAmount(claim.totalAmount)}
-                    </td>
-                    <td className="px-4 py-3">
-                      <ClaimStatusBadge status={claim.status} />
-                    </td>
-                    <td className="px-4 py-3">{formatDate(claim.submittedAt)}</td>
-                    <td className="px-4 py-3">{formatDate(claim.hodActionDate)}</td>
-                    <td className="px-4 py-3">{formatDate(claim.financeActionDate)}</td>
-                  </tr>
-                ))}
+                {rows.map((claim) => {
+                  const detail = submissionDetailsByClaimId[claim.id];
+                  const evidenceSignedUrls = submissionEvidenceSignedUrlByClaimId[claim.id] ?? {
+                    expenseReceiptSignedUrl: null,
+                    expenseBankStatementSignedUrl: null,
+                    advanceSupportingDocumentSignedUrl: null,
+                  };
+
+                  return (
+                    <tr
+                      key={claim.id}
+                      className="transition-colors hover:bg-slate-50/70 dark:hover:bg-slate-900/40"
+                    >
+                      <td className="px-4 py-3 font-medium text-slate-900 dark:text-slate-100">
+                        <Link
+                          href={ROUTES.claims.detail(claim.id)}
+                          className="text-indigo-500 hover:text-indigo-400 hover:underline"
+                        >
+                          {claim.id}
+                        </Link>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className="inline-block max-w-[180px] truncate align-bottom">
+                          {claim.employeeId}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className="inline-block max-w-[220px] truncate align-bottom">
+                          {claim.employeeName}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className="inline-block max-w-[200px] truncate align-bottom">
+                          {claim.departmentName}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className="inline-block max-w-[220px] truncate align-bottom">
+                          {claim.typeOfClaim}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 font-semibold text-slate-900 dark:text-slate-100">
+                        {formatAmount(claim.totalAmount)}
+                      </td>
+                      <td className="px-4 py-3">
+                        <ClaimStatusBadge status={claim.status} />
+                      </td>
+                      <td className="px-4 py-3">
+                        <DateWithActor
+                          dateValue={claim.submittedAt}
+                          actorEmail={claim.submitterEmail}
+                        />
+                      </td>
+                      <td className="px-4 py-3">
+                        <DateWithActor
+                          dateValue={claim.hodActionDate}
+                          actorEmail={claim.hodEmail}
+                        />
+                      </td>
+                      <td className="px-4 py-3">
+                        <DateWithActor
+                          dateValue={claim.financeActionDate}
+                          actorEmail={claim.financeEmail}
+                        />
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-3 text-right">
+                        <div className="flex items-center justify-end gap-2">
+                          {detail ? (
+                            <ApprovalsAuditModeDialog
+                              claimId={claim.id}
+                              detailType={detail.detailType}
+                              submitter={detail.submitter}
+                              amountLabel={formatAmount(claim.totalAmount)}
+                              categoryName={claim.typeOfClaim}
+                              purpose={detail.expense?.purpose ?? detail.advance?.purpose ?? null}
+                              submissionType={detail.submissionType}
+                              onBehalfEmail={detail.onBehalfEmail}
+                              expenseReceiptFilePath={detail.expense?.receiptFilePath ?? null}
+                              expenseReceiptSignedUrl={evidenceSignedUrls.expenseReceiptSignedUrl}
+                              expenseBankStatementFilePath={
+                                detail.expense?.bankStatementFilePath ?? null
+                              }
+                              expenseBankStatementSignedUrl={
+                                evidenceSignedUrls.expenseBankStatementSignedUrl
+                              }
+                              advanceSupportingDocumentPath={
+                                detail.advance?.supportingDocumentPath ?? null
+                              }
+                              advanceSupportingDocumentSignedUrl={
+                                evidenceSignedUrls.advanceSupportingDocumentSignedUrl
+                              }
+                              auditLogs={submissionAuditLogsByClaimId[claim.id] ?? []}
+                            />
+                          ) : (
+                            <Link
+                              href={ROUTES.claims.detail(claim.id)}
+                              className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-2.5 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-100 dark:border-slate-700 dark:bg-zinc-900 dark:text-slate-200 dark:hover:bg-zinc-800"
+                            >
+                              View
+                            </Link>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -739,23 +966,7 @@ export default async function MyClaimsDashboardPage({
   const currentUserResult = await authRepository.getCurrentUser();
 
   if (currentUserResult.errorMessage || !currentUserResult.user?.id) {
-    return (
-      <div className="min-h-screen bg-slate-50 px-6 py-8 dark:bg-[#0B0F1A]">
-        <main className="mx-auto max-w-6xl rounded-2xl border border-rose-200 bg-white p-6 shadow-sm transition-colors dark:border-rose-900/40 dark:bg-zinc-950">
-          <h1 className="text-xl font-semibold text-slate-900 dark:text-slate-100">My Claims</h1>
-          <p className="mt-3 rounded-xl bg-rose-50 px-3 py-2 text-sm text-rose-700 dark:bg-rose-950/40 dark:text-rose-200">
-            Unable to authenticate your session.{" "}
-            {currentUserResult.errorMessage ?? "Please log in again."}
-          </p>
-          <Link
-            href={ROUTES.login}
-            className="mt-4 inline-flex rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition-all duration-200 hover:bg-slate-700 active:scale-[0.98] dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-slate-200"
-          >
-            Go to Login
-          </Link>
-        </main>
-      </div>
-    );
+    redirect(ROUTES.login);
   }
 
   const resolvedSearchParams = await searchParams;
@@ -766,7 +977,15 @@ export default async function MyClaimsDashboardPage({
   });
   const currentEmail = currentUserResult.user.email ?? "Unknown User";
   const canViewApprovals = viewerContextResult.canViewApprovals;
-  const activeView = resolveView(firstParamValue(resolvedSearchParams?.view), canViewApprovals);
+  const requestedView = firstParamValue(resolvedSearchParams?.view);
+
+  if (canViewApprovals && !requestedView) {
+    redirect(buildViewHref(resolvedSearchParams, "approvals"));
+  }
+
+  const activeView = resolveView(requestedView, canViewApprovals);
+  const submissionsHref = buildViewHref(resolvedSearchParams, "submissions");
+  const approvalsHref = buildViewHref(resolvedSearchParams, "approvals");
 
   const [paymentModesResult, departmentsResult, locationsResult, productsResult, categoriesResult] =
     await Promise.all([
@@ -791,9 +1010,6 @@ export default async function MyClaimsDashboardPage({
     id: category.id,
     name: category.name,
   }));
-
-  const submissionsHref = buildViewHref(resolvedSearchParams, "submissions");
-  const approvalsHref = buildViewHref(resolvedSearchParams, "approvals");
 
   return (
     <div className="min-h-screen bg-slate-50 px-6 py-8 dark:bg-[#0B0F1A]">
@@ -851,6 +1067,7 @@ export default async function MyClaimsDashboardPage({
 
         <ClaimsFilterBar
           exportScope={activeView}
+          defaultFiltersExpanded={viewerContextResult.activeScope === "finance"}
           paymentModes={paymentModes}
           departments={departments}
           locations={locations}
@@ -858,7 +1075,13 @@ export default async function MyClaimsDashboardPage({
           expenseCategories={expenseCategories}
         />
 
-        <Suspense fallback={<ClaimsTableSkeleton />}>
+        {activeView === "approvals" ? (
+          <h2 className="sr-only" aria-label="Approvals History">
+            Approvals History
+          </h2>
+        ) : null}
+
+        <Suspense fallback={<TableSkeleton rows={10} columns={8} />}>
           <ClaimsCommandCenterTable
             userId={currentUserResult.user.id}
             view={activeView}
