@@ -861,6 +861,10 @@ export class SupabaseClaimRepository implements ClaimRepository {
       query = query.eq("payment_mode_id", filters.paymentModeId);
     }
 
+    if (filters?.departmentId) {
+      query = query.eq("department_id", filters.departmentId);
+    }
+
     if (filters?.submissionType) {
       query = query.eq("submission_type", filters.submissionType);
     }
@@ -2158,6 +2162,10 @@ export class SupabaseClaimRepository implements ClaimRepository {
       query = query.eq("payment_mode_id", filters.paymentModeId);
     }
 
+    if (filters?.departmentId) {
+      query = query.eq("department_id", filters.departmentId);
+    }
+
     if (filters?.submissionType) {
       query = query.eq("submission_type", filters.submissionType);
     }
@@ -2320,6 +2328,10 @@ export class SupabaseClaimRepository implements ClaimRepository {
 
     if (filters?.paymentModeId) {
       query = query.eq("payment_mode_id", filters.paymentModeId);
+    }
+
+    if (filters?.departmentId) {
+      query = query.eq("department_id", filters.departmentId);
     }
 
     if (filters?.submissionType) {

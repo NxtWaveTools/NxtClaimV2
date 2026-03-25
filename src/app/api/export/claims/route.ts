@@ -144,7 +144,7 @@ const exportClaimsHandler = async (request: NextRequest, context: AuthenticatedC
     );
   }
 
-  return new NextResponse(await buildExcelWorkbook(result.rows), {
+  return new NextResponse(new Uint8Array(await buildExcelWorkbook(result.rows)), {
     status: 200,
     headers: {
       "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -170,7 +170,7 @@ function applyHyperlinkCell(row: ExcelJS.Row, colIndex: number, url: string | nu
   }
 }
 
-async function buildExcelWorkbook(rows: ClaimExportRow[]): Promise<Buffer> {
+async function buildExcelWorkbook(rows: ClaimExportRow[]): Promise<ArrayBuffer> {
   const workbook = new ExcelJS.Workbook();
   const worksheet = workbook.addWorksheet("Claims");
 
@@ -224,7 +224,7 @@ async function buildExcelWorkbook(rows: ClaimExportRow[]): Promise<Buffer> {
     applyHyperlinkCell(excelRow, COL_PETTY_CASH_PHOTO, rowData.pettyCashPhotoUrl);
   }
 
-  return workbook.xlsx.writeBuffer() as Promise<Buffer>;
+  return workbook.xlsx.writeBuffer();
 }
 
 export const GET = withAuth(exportClaimsHandler);
