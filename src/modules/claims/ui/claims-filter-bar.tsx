@@ -2,13 +2,37 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { ROUTES } from "@/core/config/route-registry";
 import { DB_CLAIM_STATUSES } from "@/core/constants/statuses";
-import { exportClaimsCsvAction } from "@/modules/claims/actions/export-claims";
+import { getAccessTokenAction } from "@/modules/auth/actions";
 import type {
   ClaimDateTarget,
   ClaimSearchField,
   ClaimSubmissionType,
 } from "@/core/domain/claims/contracts";
+
+function getFileNameFromContentDisposition(headerValue: string | null): string | null {
+  if (!headerValue) {
+    return null;
+  }
+
+  const utf8FileNameMatch = headerValue.match(/filename\*=UTF-8''([^;]+)/i);
+  if (utf8FileNameMatch?.[1]) {
+    return decodeURIComponent(utf8FileNameMatch[1]);
+  }
+
+  const quotedFileNameMatch = headerValue.match(/filename="([^"]+)"/i);
+  if (quotedFileNameMatch?.[1]) {
+    return quotedFileNameMatch[1];
+  }
+
+  const plainFileNameMatch = headerValue.match(/filename=([^;]+)/i);
+  if (plainFileNameMatch?.[1]) {
+    return plainFileNameMatch[1].trim();
+  }
+
+  return null;
+}
 
 const SEARCH_FIELD_OPTIONS: Array<{ value: ClaimSearchField; label: string }> = [
   { value: "claim_id", label: "Claim ID" },
@@ -201,17 +225,45 @@ export function ClaimsFilterBar({
       const params = new URLSearchParams(searchParams.toString());
       params.delete("cursor");
       params.delete("prevCursor");
-      const actionResponse = await exportClaimsCsvAction({
-        scope: exportScope,
-        searchParams: params.toString(),
-      });
+      params.set("scope", exportScope);
 
-      if (!actionResponse.data || actionResponse.error) {
-        throw new Error(actionResponse.error?.message ?? "Export failed. Please try again.");
+      const accessToken = await getAccessTokenAction();
+      if (!accessToken) {
+        throw new Error("Export failed. Unauthorized session.");
       }
 
-      const fileBlob = new Blob([actionResponse.data.csvData], { type: "text/csv;charset=utf-8" });
-      const fileName = actionResponse.data.fileName || "claims_export.csv";
+      const response = await fetch(`${ROUTES.exportApi.claims}?${params.toString()}`, {
+        method: "GET",
+        cache: "no-store",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      });
+
+      if (!response.ok) {
+        const errorPayload = (await response.json().catch(() => null)) as {
+          error?: { message?: string };
+          meta?: { correlationId?: string };
+        } | null;
+
+        const message = errorPayload?.error?.message ?? `Export failed. Status: ${response.status}`;
+        const correlationId = errorPayload?.meta?.correlationId;
+        const fullMessage = correlationId
+          ? `${message} (correlationId: ${correlationId})`
+          : message;
+
+        throw new Error(fullMessage);
+      }
+
+      const xlsxBuffer = await response.arrayBuffer();
+      const headerFileName = getFileNameFromContentDisposition(
+        response.headers.get("content-disposition"),
+      );
+      const fileName = headerFileName || "claims_export.xlsx";
+
+      const fileBlob = new Blob([xlsxBuffer], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      });
 
       const objectUrl = URL.createObjectURL(fileBlob);
 

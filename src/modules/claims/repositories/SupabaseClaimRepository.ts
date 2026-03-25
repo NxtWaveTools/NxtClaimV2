@@ -384,6 +384,22 @@ const FINANCE_NON_REJECTED_VISIBLE_STATUSES: DbClaimStatus[] = [
 ];
 const L1_ACTIONABLE_STATUSES: DbClaimStatus[] = [DB_CLAIM_STATUSES[0]];
 const FINANCE_ACTIONABLE_STATUSES: DbClaimStatus[] = [DB_CLAIM_STATUSES[1], DB_CLAIM_STATUSES[2]];
+const EXPORT_CLAIM_LOOKUP_BATCH_SIZE = 50;
+const EXPORT_WALLET_LOOKUP_BATCH_SIZE = 200;
+
+function chunkArray<T>(values: T[], chunkSize: number): T[][] {
+  if (chunkSize <= 0) {
+    return [values];
+  }
+
+  const chunks: T[][] = [];
+
+  for (let index = 0; index < values.length; index += chunkSize) {
+    chunks.push(values.slice(index, index + chunkSize));
+  }
+
+  return chunks;
+}
 
 function toPostgrestInList(values: string[]): string {
   return `(${values.map((value) => `"${value.replace(/"/g, '\\"')}"`).join(",")})`;
@@ -2568,22 +2584,27 @@ export class SupabaseClaimRepository implements ClaimRepository {
       };
     }
 
-    const { data, error } = await client
-      .from("claims")
-      .select(
-        "id, status, submission_type, detail_type, submitted_by, on_behalf_of_id, employee_id, cc_emails, on_behalf_email, on_behalf_employee_code, department_id, payment_mode_id, assigned_l1_approver_id, assigned_l2_approver_id, submitted_at, hod_action_at, finance_action_at, rejection_reason, is_resubmission_allowed, created_at, updated_at, submitter_user:users!claims_submitted_by_fkey(full_name, email), beneficiary_user:users!claims_on_behalf_of_id_fkey(full_name, email), l1_approver_user:users!claims_assigned_l1_approver_id_fkey(full_name, email), l2_finance_approver:master_finance_approvers!claims_assigned_l2_approver_id_fkey(approver_user:users!master_finance_approvers_user_id_fkey(full_name, email)), master_departments(id, name), master_payment_modes(id, name), expense_details(bill_no, transaction_id, purpose, expense_category_id, product_id, location_id, is_gst_applicable, gst_number, transaction_date, basic_amount, cgst_amount, sgst_amount, igst_amount, total_amount, currency_code, vendor_name, people_involved, remarks, receipt_file_path, bank_statement_file_path, master_expense_categories(id, name), master_products(id, name), master_locations(id, name)), advance_details(requested_amount, budget_month, budget_year, expected_usage_date, purpose, product_id, location_id, remarks, supporting_document_path, master_products(id, name), master_locations(id, name))",
-      )
-      .in("id", orderedClaimIds)
-      .eq("is_active", true);
+    const rows: ExportClaimRow[] = [];
 
-    if (error) {
-      return {
-        data: [],
-        errorMessage: error.message,
-      };
+    for (const claimIdChunk of chunkArray(orderedClaimIds, EXPORT_CLAIM_LOOKUP_BATCH_SIZE)) {
+      const { data, error } = await client
+        .from("claims")
+        .select(
+          "id, status, submission_type, detail_type, submitted_by, on_behalf_of_id, employee_id, cc_emails, on_behalf_email, on_behalf_employee_code, department_id, payment_mode_id, assigned_l1_approver_id, assigned_l2_approver_id, submitted_at, hod_action_at, finance_action_at, rejection_reason, is_resubmission_allowed, created_at, updated_at, submitter_user:users!claims_submitted_by_fkey(full_name, email), beneficiary_user:users!claims_on_behalf_of_id_fkey(full_name, email), l1_approver_user:users!claims_assigned_l1_approver_id_fkey(full_name, email), l2_finance_approver:master_finance_approvers!claims_assigned_l2_approver_id_fkey(approver_user:users!master_finance_approvers_user_id_fkey(full_name, email)), master_departments(id, name), master_payment_modes(id, name), expense_details(bill_no, transaction_id, purpose, expense_category_id, product_id, location_id, is_gst_applicable, gst_number, transaction_date, basic_amount, cgst_amount, sgst_amount, igst_amount, total_amount, currency_code, vendor_name, people_involved, remarks, receipt_file_path, bank_statement_file_path, master_expense_categories(id, name), master_products(id, name), master_locations(id, name)), advance_details(requested_amount, budget_month, budget_year, expected_usage_date, purpose, product_id, location_id, remarks, supporting_document_path, master_products(id, name), master_locations(id, name))",
+        )
+        .in("id", claimIdChunk)
+        .eq("is_active", true);
+
+      if (error) {
+        return {
+          data: [],
+          errorMessage: error.message,
+        };
+      }
+
+      rows.push(...((data ?? []) as ExportClaimRow[]));
     }
 
-    const rows = (data ?? []) as ExportClaimRow[];
     const rowById = new Map(rows.map((row) => [row.id, row]));
     const walletUserIds = Array.from(
       new Set(rows.map((row) => row.on_behalf_of_id ?? row.submitted_by).filter(Boolean)),
@@ -2591,20 +2612,22 @@ export class SupabaseClaimRepository implements ClaimRepository {
     const walletBalanceByUserId = new Map<string, number | null>();
 
     if (walletUserIds.length > 0) {
-      const { data: walletRows, error: walletError } = await client
-        .from("wallets")
-        .select("user_id, petty_cash_balance")
-        .in("user_id", walletUserIds);
+      for (const walletUserIdChunk of chunkArray(walletUserIds, EXPORT_WALLET_LOOKUP_BATCH_SIZE)) {
+        const { data: walletRows, error: walletError } = await client
+          .from("wallets")
+          .select("user_id, petty_cash_balance")
+          .in("user_id", walletUserIdChunk);
 
-      if (walletError) {
-        return {
-          data: [],
-          errorMessage: walletError.message,
-        };
-      }
+        if (walletError) {
+          return {
+            data: [],
+            errorMessage: walletError.message,
+          };
+        }
 
-      for (const walletRow of (walletRows ?? []) as ExportWalletBalanceRow[]) {
-        walletBalanceByUserId.set(walletRow.user_id, toNumber(walletRow.petty_cash_balance));
+        for (const walletRow of (walletRows ?? []) as ExportWalletBalanceRow[]) {
+          walletBalanceByUserId.set(walletRow.user_id, toNumber(walletRow.petty_cash_balance));
+        }
       }
     }
 
@@ -2712,5 +2735,32 @@ export class SupabaseClaimRepository implements ClaimRepository {
       data: data.publicUrl ?? null,
       errorMessage: null,
     };
+  }
+
+  async createBulkSignedUrls(input: { filePaths: string[]; expiresInSeconds: number }): Promise<{
+    data: Record<string, string>;
+    errorMessage: string | null;
+  }> {
+    if (input.filePaths.length === 0) {
+      return { data: {}, errorMessage: null };
+    }
+
+    const client = getServiceRoleSupabaseClient();
+    const { data, error } = await client.storage
+      .from("claims")
+      .createSignedUrls(input.filePaths, input.expiresInSeconds);
+
+    if (error) {
+      return { data: {}, errorMessage: error.message };
+    }
+
+    const urlMap: Record<string, string> = {};
+    for (const entry of data ?? []) {
+      if (entry.path && entry.signedUrl && !entry.error) {
+        urlMap[entry.path] = entry.signedUrl;
+      }
+    }
+
+    return { data: urlMap, errorMessage: null };
   }
 }
