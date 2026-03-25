@@ -323,14 +323,32 @@ async function upsertMasterNames(adminClient, tableName, names) {
   return count;
 }
 
+async function tryLoadDepartmentRowsFromCsv(csvPath) {
+  try {
+    const csvRaw = await fs.readFile(csvPath, "utf8");
+    return {
+      rows: parseCsv(csvRaw),
+      csvFound: true,
+    };
+  } catch (error) {
+    if (error && error.code === "ENOENT") {
+      return {
+        rows: [],
+        csvFound: false,
+      };
+    }
+
+    throw error;
+  }
+}
+
 async function main() {
   await loadEnvFiles();
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-  const csvRaw = await fs.readFile(CSV_PATH, "utf8");
-  const rows = parseCsv(csvRaw);
+  const { rows, csvFound } = await tryLoadDepartmentRowsFromCsv(CSV_PATH);
 
   const roleMap = new Map();
   const nameMap = new Map();
@@ -365,6 +383,10 @@ async function main() {
   );
 
   console.log(`[seed-master-routing] Mode: ${DRY_RUN ? "dry-run" : "apply"}`);
+  console.log(`[seed-master-routing] CSV source: ${CSV_PATH}`);
+  console.log(
+    `[seed-master-routing] CSV found: ${csvFound ? "yes" : "no (skipping department mapping)"}`,
+  );
   console.log(`[seed-master-routing] Departments rows: ${rows.length}`);
   console.log(`[seed-master-routing] Unique users (HOD/Founder/Finance): ${roleMap.size}`);
   console.log(
