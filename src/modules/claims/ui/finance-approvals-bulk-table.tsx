@@ -50,7 +50,7 @@ type FinanceApprovalRow = {
 
 type FinanceApprovalsBulkTableProps = {
   rows: FinanceApprovalRow[];
-  totalCount: number;
+  totalSelectableCount: number;
   filters: GetMyClaimsFilters;
   approvalScope: "l1" | "finance";
   evidenceSignedUrlByClaimId: Record<
@@ -113,7 +113,7 @@ function normalizeFilters(filters: GetMyClaimsFilters): GetMyClaimsFilters {
 
 export function FinanceApprovalsBulkTable({
   rows,
-  totalCount,
+  totalSelectableCount,
   filters,
   approvalScope,
   evidenceSignedUrlByClaimId,
@@ -148,7 +148,7 @@ export function FinanceApprovalsBulkTable({
   );
   const isPageFullySelected =
     actionablePageIds.length > 0 && selectedOnPageCount === actionablePageIds.length;
-  const selectedCount = isGlobalSelect ? totalCount : selectedIds.length;
+  const selectedCount = isGlobalSelect ? totalSelectableCount : selectedIds.length;
   const canBulkAct = selectedCount > 0;
 
   const toggleMaster = (checked: boolean) => {
@@ -372,12 +372,9 @@ export function FinanceApprovalsBulkTable({
         ) : null}
       </div>
 
-      {isPageFullySelected &&
-      !isGlobalSelect &&
-      actionablePageIds.length === rows.length &&
-      totalCount > rows.length ? (
+      {isPageFullySelected && !isGlobalSelect && totalSelectableCount > actionablePageIds.length ? (
         <div className="mx-4 mt-3 rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm text-indigo-700 dark:border-indigo-800 dark:bg-indigo-950/20 dark:text-indigo-300">
-          All {rows.length} claims on this page are selected.{" "}
+          All {actionablePageIds.length} claims on this page are selected.{" "}
           <button
             type="button"
             onClick={() => {
@@ -385,14 +382,14 @@ export function FinanceApprovalsBulkTable({
             }}
             className="font-semibold underline underline-offset-2"
           >
-            Select all {totalCount} claims
+            Select all {totalSelectableCount} claims
           </button>
         </div>
       ) : null}
 
       {isGlobalSelect ? (
         <div className="mx-4 mt-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/20 dark:text-emerald-300">
-          All {totalCount} matching claims are selected.
+          All {totalSelectableCount} matching claims are selected.
           <button
             type="button"
             onClick={() => {

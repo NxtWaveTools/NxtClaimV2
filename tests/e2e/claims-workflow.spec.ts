@@ -582,57 +582,6 @@ async function resolveClaimIdByTransactionId(
   return data.id as string;
 }
 
-async function resolveClaimIdByBillNo(submitterId: string, billNo: string): Promise<string> {
-  const client = getAdminSupabaseClient();
-  await expect
-    .poll(
-      async () => {
-        const { data, error } = await querySupabaseWithRetry(() =>
-          client
-            .from("claims")
-            .select("id, expense_details!inner(bill_no)")
-            .eq("submitted_by", submitterId)
-            .eq("expense_details.bill_no", billNo)
-            .eq("is_active", true)
-            .order("created_at", { ascending: false })
-            .limit(1)
-            .maybeSingle(),
-        );
-
-        if (error) {
-          throw new Error(`Failed to resolve claim id for bill no ${billNo}: ${error.message}`);
-        }
-
-        return data?.id ?? null;
-      },
-      {
-        timeout: 45000,
-        message: `waiting for claim id by bill no ${billNo}`,
-      },
-    )
-    .not.toBeNull();
-
-  const { data, error } = await querySupabaseWithRetry(() =>
-    client
-      .from("claims")
-      .select("id, expense_details!inner(bill_no)")
-      .eq("submitted_by", submitterId)
-      .eq("expense_details.bill_no", billNo)
-      .eq("is_active", true)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle(),
-  );
-
-  if (error || !data?.id) {
-    throw new Error(
-      error?.message ?? `No claim found for submitter ${submitterId} and bill no ${billNo}.`,
-    );
-  }
-
-  return data.id as string;
-}
-
 async function resolveClaimIdByAdvancePurpose(
   submitterId: string,
   purpose: string,
@@ -804,20 +753,6 @@ async function submitReimbursementClaim(
   const claimId = await resolveClaimIdByTransactionId(actor.id, transactionId);
 
   return { claimId, marker };
-}
-
-async function waitForClaimSubmissionCompletion(page: Page): Promise<void> {
-  await Promise.race([
-    expect(page.getByText(/claim submitted successfully/i).first()).toBeVisible({
-      timeout: 30000,
-    }),
-    (async () => {
-      await expect(page).toHaveURL(/\/dashboard\/my-claims(?:\?|$)/, { timeout: 30000 });
-      await expect(page.getByRole("heading", { name: /my claims/i })).toBeVisible({
-        timeout: 30000,
-      });
-    })(),
-  ]);
 }
 
 async function submitPettyCashRequestClaim(
@@ -1424,8 +1359,6 @@ test.describe("Claims Workflow Multi-Role E2E", () => {
 
   test("Flow 4: petty cash advance approval increases wallet by exactly 40000", async () => {
     const submitterPage = getActorPage("submitter");
-    const hodPage = getActorPage("hod");
-    const finance1Page = getActorPage("finance1");
     const amount = 40000;
 
     const walletBefore = await getWalletPettyCashBalance(runtimeActors.submitter.id);
@@ -1460,7 +1393,6 @@ test.describe("Claims Workflow Multi-Role E2E", () => {
 
   test("Flow 5: petty cash expense rejected at L1 keeps wallet unchanged", async () => {
     const submitterPage = getActorPage("submitter");
-    const hodPage = getActorPage("hod");
     const amount = 30000;
 
     const walletBefore = await getWalletPettyCashBalance(runtimeActors.submitter.id);
@@ -1484,7 +1416,6 @@ test.describe("Claims Workflow Multi-Role E2E", () => {
   test("Flow 6: petty cash expense rejected at finance keeps wallet unchanged and remains visible to finance2 history", async () => {
     const submitterPage = getActorPage("submitter");
     const hodPage = getActorPage("hod");
-    const finance1Page = getActorPage("finance1");
     const finance2Page = getActorPage("finance2");
     const amount = 15000;
 
@@ -1518,7 +1449,6 @@ test.describe("Claims Workflow Multi-Role E2E", () => {
 
   test("Flow 7: fully approved petty cash expense decreases wallet by exactly 10000", async () => {
     const submitterPage = getActorPage("submitter");
-    const hodPage = getActorPage("hod");
     const amount = 10000;
 
     const client = getAdminSupabaseClient();

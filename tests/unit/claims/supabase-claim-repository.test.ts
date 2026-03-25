@@ -2,15 +2,19 @@ import { SupabaseClaimRepository } from "@/modules/claims/repositories/SupabaseC
 
 type QueryResult = {
   data: unknown;
+  count?: number | null;
   error: { message: string } | null;
 };
 
 type QueryBuilder = {
+  select: jest.Mock;
   or: jest.Mock;
   eq: jest.Mock;
   in: jest.Mock;
   gte: jest.Mock;
   lte: jest.Mock;
+  ilike: jest.Mock;
+  limit: jest.Mock;
   order: jest.Mock;
   then: (
     onFulfilled: (value: QueryResult) => unknown,
@@ -27,11 +31,14 @@ jest.mock("@/core/infra/supabase/server-client", () => ({
 
 function createQueryBuilder(result: QueryResult): QueryBuilder {
   const builder: QueryBuilder = {
+    select: jest.fn(() => builder),
     or: jest.fn(() => builder),
     eq: jest.fn(() => builder),
     in: jest.fn(() => builder),
     gte: jest.fn(() => builder),
     lte: jest.fn(() => builder),
+    ilike: jest.fn(() => builder),
+    limit: jest.fn(() => builder),
     order: jest.fn(() => builder),
     then: (onFulfilled, onRejected) => Promise.resolve(result).then(onFulfilled, onRejected),
   };
@@ -137,6 +144,68 @@ describe("SupabaseClaimRepository.getMyClaims", () => {
     expect(queryBuilder.in).toHaveBeenCalledWith("status", [
       "Finance Approved - Payment under process",
       "Payment Done - Closed",
+    ]);
+  });
+});
+
+describe("SupabaseClaimRepository selectable approvals counts", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  test("returns actionable L1 total count for cross-page selection", async () => {
+    const countBuilder = createQueryBuilder({
+      data: null,
+      count: 9,
+      error: null,
+    });
+
+    mockFrom.mockReturnValue({
+      select: jest.fn(() => countBuilder),
+    });
+
+    mockGetServiceRoleSupabaseClient.mockReturnValue({
+      from: mockFrom,
+    });
+
+    const repository = new SupabaseClaimRepository();
+    const result = await repository.getL1PendingApprovalsCount("hod-user");
+
+    expect(result).toEqual({ count: 9, errorMessage: null });
+    expect(countBuilder.eq).toHaveBeenCalledWith("assigned_l1_approver_id", "hod-user");
+    expect(countBuilder.in).toHaveBeenCalledWith("status", ["Submitted - Awaiting HOD approval"]);
+  });
+
+  test("returns actionable finance total count for cross-page selection", async () => {
+    const financeApproverBuilder = createQueryBuilder({
+      data: [{ id: "fin-approver-1" }],
+      error: null,
+    });
+    const financeCountBuilder = createQueryBuilder({
+      data: null,
+      count: 14,
+      error: null,
+    });
+
+    mockFrom
+      .mockReturnValueOnce({
+        select: jest.fn(() => financeApproverBuilder),
+      })
+      .mockReturnValueOnce({
+        select: jest.fn(() => financeCountBuilder),
+      });
+
+    mockGetServiceRoleSupabaseClient.mockReturnValue({
+      from: mockFrom,
+    });
+
+    const repository = new SupabaseClaimRepository();
+    const result = await repository.getFinancePendingApprovalsCount("finance-user");
+
+    expect(result).toEqual({ count: 14, errorMessage: null });
+    expect(financeCountBuilder.in).toHaveBeenCalledWith("status", [
+      "HOD approved - Awaiting finance approval",
+      "Finance Approved - Payment under process",
     ]);
   });
 });

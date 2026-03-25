@@ -87,6 +87,8 @@ function createClaimRepository(overrides?: Partial<ClaimRepository>): ClaimRepos
       claimId: "CLAIM-ADV-TEST-20260317-0001",
       errorMessage: null,
     })),
+    createClaimAuditLog: jest.fn(async () => ({ errorMessage: null })),
+    getClaimAuditLogs: jest.fn(async () => ({ data: [], errorMessage: null })),
     getClaimForFinanceEdit: jest.fn(async () => ({ data: null, errorMessage: null })),
     updateClaimDetailsByFinance: jest.fn(async () => ({ errorMessage: null })),
     getMyClaims: jest.fn(async () => ({ data: [], errorMessage: null })),

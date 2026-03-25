@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { Eye, X } from "lucide-react";
+import { Eye, PanelLeftClose, PanelLeftOpen, X } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
 import { ROUTES } from "@/core/config/route-registry";
 import type { ClaimAuditLogRecord } from "@/core/domain/claims/contracts";
@@ -140,6 +140,7 @@ export function ApprovalsAuditModeDialog({
   children,
 }: ApprovalsQuickViewSheetProps) {
   const [isOpen, setIsOpen] = useState(false);
+  const [isDetailsOpen, setIsDetailsOpen] = useState(true);
   const [activeEvidenceKey, setActiveEvidenceKey] = useState<string>("receipt");
 
   const onBehalfContext = useMemo(() => {
@@ -225,6 +226,7 @@ export function ApprovalsAuditModeDialog({
         type="button"
         onClick={() => {
           setIsOpen(true);
+          setIsDetailsOpen(true);
           setActiveEvidenceKey("receipt");
         }}
         className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-2.5 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-100 dark:border-slate-700 dark:bg-zinc-900 dark:text-slate-200 dark:hover:bg-zinc-800"
@@ -245,105 +247,133 @@ export function ApprovalsAuditModeDialog({
           />
 
           <section className="absolute inset-0 m-0 h-screen w-screen max-w-none rounded-none bg-white p-0 shadow-2xl dark:bg-zinc-950">
+            <button
+              type="button"
+              aria-label="Close"
+              onClick={() => {
+                setIsOpen(false);
+              }}
+              className="absolute right-4 top-4 z-50 inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-300 bg-white/90 text-slate-700 backdrop-blur transition-colors hover:bg-slate-100 dark:border-slate-700 dark:bg-zinc-900/90 dark:text-slate-200 dark:hover:bg-zinc-800"
+            >
+              <X className="h-4 w-4" aria-hidden="true" />
+            </button>
+
             <div className="flex h-full w-full">
-              <aside className="flex h-full w-[30%] min-w-[340px] flex-col border-r border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-zinc-900">
-                <div className="flex items-start justify-between gap-3 border-b border-slate-200 px-6 py-5 dark:border-slate-800">
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">
-                      Audit Mode
-                    </p>
-                    <h2 className="mt-1 text-lg font-semibold text-slate-900 dark:text-slate-100">
-                      <Link
-                        href={ROUTES.claims.detail(claimId)}
-                        className="text-indigo-600 hover:underline dark:text-indigo-400"
-                      >
-                        {claimId}
-                      </Link>
-                    </h2>
-                    <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">{submitter}</p>
+              <div
+                className={`overflow-hidden transition-all duration-300 ease-in-out ${
+                  isDetailsOpen ? "w-96" : "w-0"
+                }`}
+              >
+                <aside className="flex h-full w-96 flex-col border-r border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-zinc-900">
+                  <div className="flex items-start justify-between gap-3 border-b border-slate-200 px-6 py-5 dark:border-slate-800">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">
+                        Audit Mode
+                      </p>
+                      <h2 className="mt-1 text-lg font-semibold text-slate-900 dark:text-slate-100">
+                        <Link
+                          href={ROUTES.claims.detail(claimId)}
+                          className="text-indigo-600 hover:underline dark:text-indigo-400"
+                        >
+                          {claimId}
+                        </Link>
+                      </h2>
+                      <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">{submitter}</p>
+                    </div>
                   </div>
-                  <button
-                    type="button"
-                    aria-label="Close"
-                    onClick={() => {
-                      setIsOpen(false);
-                    }}
-                    className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-300 text-slate-600 transition-colors hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-zinc-800"
-                  >
-                    <X className="h-4 w-4" aria-hidden="true" />
-                  </button>
-                </div>
 
-                <div className="flex-1 overflow-y-auto px-6 py-5">
-                  <section className="grid gap-3 sm:grid-cols-2">
-                    <article className="rounded-xl border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-zinc-950">
-                      <p className="text-xs uppercase tracking-[0.1em] text-slate-500 dark:text-slate-400">
-                        Amount
-                      </p>
-                      <p className="mt-1 text-sm font-semibold text-slate-900 dark:text-slate-100">
-                        {amountLabel}
-                      </p>
-                    </article>
-                    <article className="rounded-xl border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-zinc-950">
-                      <p className="text-xs uppercase tracking-[0.1em] text-slate-500 dark:text-slate-400">
-                        Category
-                      </p>
-                      <p className="mt-1 text-sm font-semibold text-slate-900 dark:text-slate-100">
-                        {categoryName}
-                      </p>
-                    </article>
-                    <article className="rounded-xl border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-zinc-950 sm:col-span-2">
-                      <p className="text-xs uppercase tracking-[0.1em] text-slate-500 dark:text-slate-400">
-                        Purpose
-                      </p>
-                      <p className="mt-1 text-sm font-medium text-slate-900 dark:text-slate-100">
-                        {purpose ?? "N/A"}
-                      </p>
-                    </article>
-                    <article className="rounded-xl border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-zinc-950 sm:col-span-2">
-                      <p className="text-xs uppercase tracking-[0.1em] text-slate-500 dark:text-slate-400">
-                        On Behalf Context
-                      </p>
-                      <p className="mt-1 text-sm font-medium text-slate-900 dark:text-slate-100">
-                        {onBehalfContext}
-                      </p>
-                    </article>
-                  </section>
+                  <div className="flex-1 overflow-y-auto px-6 py-5">
+                    <section className="grid gap-3 sm:grid-cols-2">
+                      <article className="rounded-xl border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-zinc-950">
+                        <p className="text-xs uppercase tracking-[0.1em] text-slate-500 dark:text-slate-400">
+                          Amount
+                        </p>
+                        <p className="mt-1 text-sm font-semibold text-slate-900 dark:text-slate-100">
+                          {amountLabel}
+                        </p>
+                      </article>
+                      <article className="rounded-xl border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-zinc-950">
+                        <p className="text-xs uppercase tracking-[0.1em] text-slate-500 dark:text-slate-400">
+                          Category
+                        </p>
+                        <p className="mt-1 text-sm font-semibold text-slate-900 dark:text-slate-100">
+                          {categoryName}
+                        </p>
+                      </article>
+                      <article className="rounded-xl border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-zinc-950 sm:col-span-2">
+                        <p className="text-xs uppercase tracking-[0.1em] text-slate-500 dark:text-slate-400">
+                          Purpose
+                        </p>
+                        <p className="mt-1 text-sm font-medium text-slate-900 dark:text-slate-100">
+                          {purpose ?? "N/A"}
+                        </p>
+                      </article>
+                      <article className="rounded-xl border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-zinc-950 sm:col-span-2">
+                        <p className="text-xs uppercase tracking-[0.1em] text-slate-500 dark:text-slate-400">
+                          On Behalf Context
+                        </p>
+                        <p className="mt-1 text-sm font-medium text-slate-900 dark:text-slate-100">
+                          {onBehalfContext}
+                        </p>
+                      </article>
+                    </section>
 
-                  <div className="mt-5">
-                    <ClaimAuditTimeline
-                      logs={auditLogs}
-                      title="Audit History"
-                      emptyLabel="No audit history available for this claim yet."
-                    />
-                  </div>
-                </div>
-
-                <section className="sticky bottom-0 border-t border-slate-200 bg-slate-50 px-6 py-4 dark:border-slate-800 dark:bg-zinc-900">
-                  <p className="mb-3 text-xs font-semibold uppercase tracking-[0.1em] text-slate-500 dark:text-slate-400">
-                    Take Action
-                  </p>
-                  <div className="flex flex-wrap items-start gap-3">{children}</div>
-                </section>
-              </aside>
-
-              <section className="flex h-full w-[70%] flex-col bg-white dark:bg-zinc-950">
-                <div className="border-b border-slate-200 px-6 py-4 dark:border-slate-800">
-                  <div className="flex items-center justify-between gap-3">
-                    <AuditModeTabs
-                      tabs={tabs}
-                      activeTab={activeEvidenceKey}
-                      onSelect={setActiveEvidenceKey}
-                    />
-
-                    {activeEntry ? (
-                      <ClaimSemanticDownloadButton
-                        url={activeEntry.signedUrl}
-                        semanticName={activeEntry.semanticName}
-                        label={activeEntry.label}
-                        compact
+                    <div className="mt-5">
+                      <ClaimAuditTimeline
+                        logs={auditLogs}
+                        title="Audit History"
+                        emptyLabel="No audit history available for this claim yet."
                       />
-                    ) : null}
+                    </div>
+                  </div>
+
+                  <section className="sticky bottom-0 border-t border-slate-200 bg-slate-50 px-6 py-4 dark:border-slate-800 dark:bg-zinc-900">
+                    <p className="mb-3 text-xs font-semibold uppercase tracking-[0.1em] text-slate-500 dark:text-slate-400">
+                      Take Action
+                    </p>
+                    <div className="flex flex-wrap items-start gap-3">{children}</div>
+                  </section>
+                </aside>
+              </div>
+
+              <section className="flex h-full min-w-0 flex-1 flex-col bg-white dark:bg-zinc-950">
+                <div className="border-b border-slate-200 px-6 py-4 pr-20 dark:border-slate-800">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex min-w-0 items-center gap-3">
+                      <button
+                        type="button"
+                        aria-label={
+                          isDetailsOpen ? "Collapse audit details" : "Expand audit details"
+                        }
+                        onClick={() => {
+                          setIsDetailsOpen((current) => !current);
+                        }}
+                        className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-700 transition-colors hover:bg-slate-100 dark:border-slate-700 dark:bg-zinc-900 dark:text-slate-200 dark:hover:bg-zinc-800"
+                      >
+                        {isDetailsOpen ? (
+                          <PanelLeftClose className="h-4 w-4" aria-hidden="true" />
+                        ) : (
+                          <PanelLeftOpen className="h-4 w-4" aria-hidden="true" />
+                        )}
+                      </button>
+
+                      <AuditModeTabs
+                        tabs={tabs}
+                        activeTab={activeEvidenceKey}
+                        onSelect={setActiveEvidenceKey}
+                      />
+                    </div>
+
+                    <div className="shrink-0">
+                      {activeEntry ? (
+                        <ClaimSemanticDownloadButton
+                          url={activeEntry.signedUrl}
+                          semanticName={activeEntry.semanticName}
+                          label={activeEntry.label}
+                          compact
+                        />
+                      ) : null}
+                    </div>
                   </div>
                 </div>
 

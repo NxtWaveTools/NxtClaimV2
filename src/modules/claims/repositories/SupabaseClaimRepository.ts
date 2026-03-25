@@ -382,6 +382,8 @@ const FINANCE_NON_REJECTED_VISIBLE_STATUSES: DbClaimStatus[] = [
   DB_CLAIM_STATUSES[2],
   DB_CLAIM_STATUSES[3],
 ];
+const L1_ACTIONABLE_STATUSES: DbClaimStatus[] = [DB_CLAIM_STATUSES[0]];
+const FINANCE_ACTIONABLE_STATUSES: DbClaimStatus[] = [DB_CLAIM_STATUSES[1], DB_CLAIM_STATUSES[2]];
 
 function toPostgrestInList(values: string[]): string {
   return `(${values.map((value) => `"${value.replace(/"/g, '\\"')}"`).join(",")})`;
@@ -788,16 +790,10 @@ export class SupabaseClaimRepository implements ClaimRepository {
       return { count: 0, errorMessage: null };
     }
 
-    const financeNonRejectedStatusesFilter = toPostgrestInList(
-      FINANCE_NON_REJECTED_VISIBLE_STATUSES,
-    );
-
     let query = client
       .from("vw_enterprise_claims_dashboard")
       .select("claim_id", { count: "exact", head: true })
-      .or(
-        `status.in.${financeNonRejectedStatusesFilter},and(status.eq.Rejected,assigned_l2_approver_id.not.is.null)`,
-      );
+      .in("status", FINANCE_ACTIONABLE_STATUSES);
 
     query = applyEnterpriseDashboardFilters({
       query,
@@ -807,6 +803,85 @@ export class SupabaseClaimRepository implements ClaimRepository {
       toDate,
       normalizedSearch,
     });
+
+    const { count, error } = await query;
+
+    if (error) {
+      return { count: 0, errorMessage: error.message };
+    }
+
+    return { count: count ?? 0, errorMessage: null };
+  }
+
+  async getL1PendingApprovalsCount(
+    userId: string,
+    filters?: GetMyClaimsFilters,
+  ): Promise<{ count: number; errorMessage: string | null }> {
+    const client = getServiceRoleSupabaseClient();
+    const normalizedStatuses = normalizeStatusFilter(filters?.status);
+    const { fromDate, toDate } = normalizeDateRange(filters);
+    const dateColumn = filters?.dateTarget === "finance_closed" ? "updated_at" : "submitted_at";
+    const normalizedSearch = normalizeSearchInput(filters);
+
+    if (filters?.dateTarget === "finance_closed") {
+      return { count: 0, errorMessage: null };
+    }
+
+    let query = client
+      .from("claims")
+      .select("id, submitter_user:users!claims_submitted_by_fkey!inner(full_name)", {
+        count: "exact",
+        head: true,
+      })
+      .eq("assigned_l1_approver_id", userId)
+      .eq("is_active", true)
+      .in("status", L1_ACTIONABLE_STATUSES);
+
+    if (filters?.detailType) {
+      query = query.eq("detail_type", filters.detailType);
+    }
+
+    if (filters?.paymentModeId) {
+      query = query.eq("payment_mode_id", filters.paymentModeId);
+    }
+
+    if (filters?.submissionType) {
+      query = query.eq("submission_type", filters.submissionType);
+    }
+
+    if (normalizedStatuses.length > 0) {
+      const actionableStatuses = normalizedStatuses.filter((status) =>
+        L1_ACTIONABLE_STATUSES.includes(status),
+      );
+
+      if (actionableStatuses.length === 0) {
+        return { count: 0, errorMessage: null };
+      }
+
+      query = query.in("status", actionableStatuses);
+    }
+
+    if (fromDate) {
+      query = query.gte(dateColumn, `${fromDate}T00:00:00.000Z`);
+    }
+
+    if (toDate) {
+      query = query.lte(dateColumn, `${toDate}T23:59:59.999Z`);
+    }
+
+    if (normalizedSearch.query && normalizedSearch.field) {
+      if (normalizedSearch.field === "claim_id") {
+        query = query.eq("id", normalizedSearch.query);
+      }
+
+      if (normalizedSearch.field === "employee_name") {
+        query = query.ilike("submitter_user.full_name", `%${normalizedSearch.query}%`);
+      }
+
+      if (normalizedSearch.field === "employee_id") {
+        query = query.ilike("employee_id", `%${normalizedSearch.query}%`);
+      }
+    }
 
     const { count, error } = await query;
 

@@ -35,12 +35,8 @@ import { ApprovalsAuditModeDialog } from "@/modules/claims/ui/approvals-quick-vi
 import { ClaimSemanticDownloadButton } from "@/modules/claims/ui/claim-semantic-download-button";
 
 const PAGE_SIZE = 10;
-<p
-  aria-hidden="true"
-  className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-700 dark:text-slate-300"
->
-  type SearchParamsValue = string | string[] | undefined;
-</p>;
+type SearchParamsValue = string | string[] | undefined;
+type ViewMode = "submissions" | "approvals";
 
 function firstParamValue(value: SearchParamsValue): string | undefined {
   if (Array.isArray(value)) {
@@ -428,14 +424,8 @@ async function ClaimsCommandCenterTable({
     if (approvalScope === "finance" || approvalScope === "l1") {
       const totalCount =
         approvalScope === "finance"
-          ? (() => {
-              const approvalsCountResult = claimRepository.getFinancePendingApprovalsCount(
-                userId,
-                filters,
-              );
-              return approvalsCountResult;
-            })()
-          : Promise.resolve({ count: rows.length, errorMessage: null as string | null });
+          ? claimRepository.getFinancePendingApprovalsCount(userId, filters)
+          : claimRepository.getL1PendingApprovalsCount(userId, filters);
 
       const resolvedTotalCount = await totalCount;
       const evidenceSignedUrlByClaimId = await resolveApprovalEvidenceUrls(claimRepository, rows);
@@ -486,7 +476,7 @@ async function ClaimsCommandCenterTable({
                   hodActionDate: null,
                   financeActionDate: null,
                 }))}
-                totalCount={
+                totalSelectableCount={
                   resolvedTotalCount.errorMessage ? rows.length : resolvedTotalCount.count
                 }
                 filters={filters}
@@ -785,6 +775,30 @@ async function ClaimsCommandCenterTable({
   });
 
   const rows = claimsResult.data;
+  const submissionDetailEntries = await Promise.all(
+    rows.map(async (claim) => {
+      const detailResult = await claimRepository.getClaimDetailById(claim.id);
+      return [claim.id, detailResult.data] as const;
+    }),
+  );
+  const submissionDetailsByClaimId = Object.fromEntries(submissionDetailEntries);
+  const submissionEvidenceSignedUrlByClaimId = await resolveApprovalEvidenceUrls(
+    claimRepository,
+    rows.map((claim) => {
+      const detail = submissionDetailsByClaimId[claim.id];
+
+      return {
+        id: claim.id,
+        expenseReceiptFilePath: detail?.expense?.receiptFilePath ?? null,
+        expenseBankStatementFilePath: detail?.expense?.bankStatementFilePath ?? null,
+        advanceSupportingDocumentPath: detail?.advance?.supportingDocumentPath ?? null,
+      };
+    }),
+  );
+  const submissionAuditLogsByClaimId = await resolveAuditLogsByClaimId(
+    claimRepository,
+    rows.map((claim) => claim.id),
+  );
 
   return (
     <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition-colors dark:border-slate-800 dark:bg-zinc-950">
@@ -811,64 +825,114 @@ async function ClaimsCommandCenterTable({
         <>
           <div className="overflow-x-auto">
             <table className="min-w-[1500px] divide-y divide-slate-200 text-left text-sm dark:divide-slate-800">
-              <TableHeader showActions={false} />
+              <TableHeader showActions />
               <tbody className="divide-y divide-slate-100 bg-white text-slate-700 dark:divide-slate-900 dark:bg-zinc-950 dark:text-slate-300">
-                {rows.map((claim) => (
-                  <tr
-                    key={claim.id}
-                    className="transition-colors hover:bg-slate-50/70 dark:hover:bg-slate-900/40"
-                  >
-                    <td className="px-4 py-3 font-medium text-slate-900 dark:text-slate-100">
-                      <Link
-                        href={ROUTES.claims.detail(claim.id)}
-                        className="text-indigo-500 hover:text-indigo-400 hover:underline"
-                      >
-                        {claim.id}
-                      </Link>
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className="inline-block max-w-[180px] truncate align-bottom">
-                        {claim.employeeId}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className="inline-block max-w-[220px] truncate align-bottom">
-                        {claim.employeeName}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className="inline-block max-w-[200px] truncate align-bottom">
-                        {claim.departmentName}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className="inline-block max-w-[220px] truncate align-bottom">
-                        {claim.typeOfClaim}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 font-semibold text-slate-900 dark:text-slate-100">
-                      {formatAmount(claim.totalAmount)}
-                    </td>
-                    <td className="px-4 py-3">
-                      <ClaimStatusBadge status={claim.status} />
-                    </td>
-                    <td className="px-4 py-3">
-                      <DateWithActor
-                        dateValue={claim.submittedAt}
-                        actorEmail={claim.submitterEmail}
-                      />
-                    </td>
-                    <td className="px-4 py-3">
-                      <DateWithActor dateValue={claim.hodActionDate} actorEmail={claim.hodEmail} />
-                    </td>
-                    <td className="px-4 py-3">
-                      <DateWithActor
-                        dateValue={claim.financeActionDate}
-                        actorEmail={claim.financeEmail}
-                      />
-                    </td>
-                  </tr>
-                ))}
+                {rows.map((claim) => {
+                  const detail = submissionDetailsByClaimId[claim.id];
+                  const evidenceSignedUrls = submissionEvidenceSignedUrlByClaimId[claim.id] ?? {
+                    expenseReceiptSignedUrl: null,
+                    expenseBankStatementSignedUrl: null,
+                    advanceSupportingDocumentSignedUrl: null,
+                  };
+
+                  return (
+                    <tr
+                      key={claim.id}
+                      className="transition-colors hover:bg-slate-50/70 dark:hover:bg-slate-900/40"
+                    >
+                      <td className="px-4 py-3 font-medium text-slate-900 dark:text-slate-100">
+                        <Link
+                          href={ROUTES.claims.detail(claim.id)}
+                          className="text-indigo-500 hover:text-indigo-400 hover:underline"
+                        >
+                          {claim.id}
+                        </Link>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className="inline-block max-w-[180px] truncate align-bottom">
+                          {claim.employeeId}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className="inline-block max-w-[220px] truncate align-bottom">
+                          {claim.employeeName}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className="inline-block max-w-[200px] truncate align-bottom">
+                          {claim.departmentName}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className="inline-block max-w-[220px] truncate align-bottom">
+                          {claim.typeOfClaim}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 font-semibold text-slate-900 dark:text-slate-100">
+                        {formatAmount(claim.totalAmount)}
+                      </td>
+                      <td className="px-4 py-3">
+                        <ClaimStatusBadge status={claim.status} />
+                      </td>
+                      <td className="px-4 py-3">
+                        <DateWithActor
+                          dateValue={claim.submittedAt}
+                          actorEmail={claim.submitterEmail}
+                        />
+                      </td>
+                      <td className="px-4 py-3">
+                        <DateWithActor
+                          dateValue={claim.hodActionDate}
+                          actorEmail={claim.hodEmail}
+                        />
+                      </td>
+                      <td className="px-4 py-3">
+                        <DateWithActor
+                          dateValue={claim.financeActionDate}
+                          actorEmail={claim.financeEmail}
+                        />
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-3 text-right">
+                        <div className="flex items-center justify-end gap-2">
+                          {detail ? (
+                            <ApprovalsAuditModeDialog
+                              claimId={claim.id}
+                              detailType={detail.detailType}
+                              submitter={detail.submitter}
+                              amountLabel={formatAmount(claim.totalAmount)}
+                              categoryName={claim.typeOfClaim}
+                              purpose={detail.expense?.purpose ?? detail.advance?.purpose ?? null}
+                              submissionType={detail.submissionType}
+                              onBehalfEmail={detail.onBehalfEmail}
+                              expenseReceiptFilePath={detail.expense?.receiptFilePath ?? null}
+                              expenseReceiptSignedUrl={evidenceSignedUrls.expenseReceiptSignedUrl}
+                              expenseBankStatementFilePath={
+                                detail.expense?.bankStatementFilePath ?? null
+                              }
+                              expenseBankStatementSignedUrl={
+                                evidenceSignedUrls.expenseBankStatementSignedUrl
+                              }
+                              advanceSupportingDocumentPath={
+                                detail.advance?.supportingDocumentPath ?? null
+                              }
+                              advanceSupportingDocumentSignedUrl={
+                                evidenceSignedUrls.advanceSupportingDocumentSignedUrl
+                              }
+                              auditLogs={submissionAuditLogsByClaimId[claim.id] ?? []}
+                            />
+                          ) : (
+                            <Link
+                              href={ROUTES.claims.detail(claim.id)}
+                              className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-2.5 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-100 dark:border-slate-700 dark:bg-zinc-900 dark:text-slate-200 dark:hover:bg-zinc-800"
+                            >
+                              View
+                            </Link>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

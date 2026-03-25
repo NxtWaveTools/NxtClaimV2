@@ -86,6 +86,8 @@ function createRepository(overrides?: Partial<ClaimRepository>): ClaimRepository
       claimId: "77777777-7777-7777-7777-777777777777",
       errorMessage: null,
     })),
+    createClaimAuditLog: jest.fn(async () => ({ errorMessage: null })),
+    getClaimAuditLogs: jest.fn(async () => ({ data: [], errorMessage: null })),
     getClaimForFinanceEdit: jest.fn(async () => ({ data: null, errorMessage: null })),
     updateClaimDetailsByFinance: jest.fn(async () => ({ errorMessage: null })),
     getMyClaims: jest.fn(async () => ({ data: [], errorMessage: null })),
