@@ -417,7 +417,7 @@ async function ClaimsCommandCenterTable({
       );
 
       return (
-        <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition-colors dark:border-slate-800 dark:bg-zinc-950">
+        <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition-colors dark:border-slate-800 dark:bg-slate-900">
           {approvalsResult.errorMessage ? (
             <div className="px-4 py-6">
               <p className="rounded-xl bg-rose-50 px-3 py-2 text-sm text-rose-700 dark:bg-rose-950/40 dark:text-rose-200">
@@ -503,7 +503,7 @@ async function ClaimsCommandCenterTable({
     };
 
     return (
-      <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition-colors dark:border-slate-800 dark:bg-zinc-950">
+      <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition-colors dark:border-slate-800 dark:bg-slate-900">
         <div className="border-b border-slate-200 px-4 py-3 dark:border-slate-800">
           <p
             aria-hidden="true"
@@ -533,7 +533,7 @@ async function ClaimsCommandCenterTable({
             <div className="w-full overflow-x-auto">
               <table className="min-w-[1720px] divide-y divide-slate-200 text-left text-sm dark:divide-slate-800">
                 <TableHeader showActions />
-                <tbody className="divide-y divide-slate-100 bg-white text-slate-700 dark:divide-slate-900 dark:bg-zinc-950 dark:text-slate-300">
+                <tbody className="divide-y divide-slate-100 bg-white text-slate-700 dark:divide-slate-800 dark:bg-slate-900 dark:text-slate-300">
                   {rows.map((claim) => {
                     const evidenceSignedUrls = evidenceSignedUrlByClaimId[claim.id] ?? {
                       expenseReceiptSignedUrl: null,
@@ -791,7 +791,7 @@ async function ClaimsCommandCenterTable({
   );
 
   return (
-    <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition-colors dark:border-slate-800 dark:bg-zinc-950">
+    <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition-colors dark:border-slate-800 dark:bg-slate-900">
       <div className="border-b border-slate-200 px-4 py-3 dark:border-slate-800">
         <h2 className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-700 dark:text-slate-300">
           My Submissions
@@ -816,7 +816,7 @@ async function ClaimsCommandCenterTable({
           <div className="overflow-x-auto">
             <table className="min-w-[1500px] divide-y divide-slate-200 text-left text-sm dark:divide-slate-800">
               <TableHeader showActions />
-              <tbody className="divide-y divide-slate-100 bg-white text-slate-700 dark:divide-slate-900 dark:bg-zinc-950 dark:text-slate-300">
+              <tbody className="divide-y divide-slate-100 bg-white text-slate-700 dark:divide-slate-800 dark:bg-slate-900 dark:text-slate-300">
                 {rows.map((claim) => {
                   const detail = submissionDetailsByClaimId[claim.id];
                   const evidenceSignedUrls = submissionEvidenceSignedUrlByClaimId[claim.id] ?? {
@@ -909,7 +909,7 @@ async function ClaimsCommandCenterTable({
                           ) : (
                             <Link
                               href={ROUTES.claims.detail(claim.id)}
-                              className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-2.5 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-100 dark:border-slate-700 dark:bg-zinc-900 dark:text-slate-200 dark:hover:bg-zinc-800"
+                              className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-2.5 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-zinc-800"
                             >
                               View
                             </Link>
@@ -939,7 +939,7 @@ async function ClaimsCommandCenterTable({
 
 function FilterBarSkeleton() {
   return (
-    <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition-colors dark:border-slate-800 dark:bg-zinc-950">
+    <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition-colors dark:border-slate-800 dark:bg-slate-900">
       <div className="grid gap-3 md:grid-cols-5">
         {Array.from({ length: 5 }).map((_, index) => (
           <div key={`filter-placeholder-${index}`} className="space-y-1">
@@ -1041,7 +1041,7 @@ export default async function MyClaimsDashboardPage({
     <div className="min-h-screen bg-slate-50 px-6 py-8 dark:bg-[#0B0F1A]">
       <main className="mx-auto max-w-7xl space-y-5">
         <BackButton className="w-fit" />
-        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm transition-colors dark:border-slate-800 dark:bg-zinc-950">
+        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm transition-colors dark:border-slate-800 dark:bg-slate-900">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <h1 className="text-3xl font-semibold text-slate-900 dark:text-slate-100">

@@ -2,7 +2,7 @@ import { TableSkeleton } from "@/components/ui/table-skeleton";
 
 function HeaderSkeleton() {
   return (
-    <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm transition-colors dark:border-slate-800 dark:bg-zinc-950">
+    <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm transition-colors dark:border-slate-800 dark:bg-slate-900">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="space-y-2">
           <div className="shimmer-sweep h-8 w-44 rounded-md bg-slate-200 dark:bg-gray-800/40" />
@@ -25,7 +25,7 @@ function HeaderSkeleton() {
 
 function FilterSkeleton() {
   return (
-    <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition-colors dark:border-slate-800 dark:bg-zinc-950">
+    <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition-colors dark:border-slate-800 dark:bg-slate-900">
       <div className="grid gap-3 md:grid-cols-5">
         {Array.from({ length: 5 }).map((_, index) => (
           <div key={`filter-placeholder-${index}`} className="space-y-1">
