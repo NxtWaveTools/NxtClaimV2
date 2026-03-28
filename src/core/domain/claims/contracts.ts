@@ -139,7 +139,12 @@ export type GetMyClaimsFilters = {
   searchQuery?: string;
 };
 
-export type ClaimsExportFetchScope = "submissions" | "l1_approvals" | "finance_approvals";
+export type ClaimsExportFetchScope =
+  | "submissions"
+  | "l1_approvals"
+  | "finance_approvals"
+  | "admin"
+  | "department_viewer";
 
 export type ClaimExportRecord = {
   claimId: string;

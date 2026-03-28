@@ -978,7 +978,7 @@ async function FilterBarWithData({
   exportScope,
   defaultFiltersExpanded,
 }: {
-  exportScope: "submissions" | "approvals";
+  exportScope: "submissions" | "approvals" | "admin" | "department";
   defaultFiltersExpanded: boolean;
 }) {
   const claimRepository = new SupabaseClaimRepository();

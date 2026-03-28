@@ -117,6 +117,7 @@ async function DeptFilterBarWithData() {
 
   return (
     <ClaimsFilterBar
+      exportScope="department"
       defaultFiltersExpanded
       paymentModes={paymentModesResult.data.map((m) => ({ id: m.id, name: m.name }))}
       departments={departmentsResult.data.map((d) => ({ id: d.id, name: d.name }))}

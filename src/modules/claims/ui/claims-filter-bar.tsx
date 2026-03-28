@@ -95,7 +95,7 @@ function hasActiveFilterParams(params: URLSearchParams): boolean {
 }
 
 type ClaimsFilterBarProps = {
-  exportScope?: "submissions" | "approvals";
+  exportScope?: "submissions" | "approvals" | "admin" | "department";
   defaultFiltersExpanded?: boolean;
   paymentModes: Array<{ id: string; name: string }>;
   departments: Array<{ id: string; name: string }>;
@@ -278,7 +278,7 @@ export function ClaimsFilterBar({
   }
 
   async function handleExportCsv(): Promise<void> {
-    if (isExporting) {
+    if (isExporting || !exportScope) {
       return;
     }
 
@@ -288,7 +288,7 @@ export function ClaimsFilterBar({
       const params = new URLSearchParams(searchParams.toString());
       params.delete("cursor");
       params.delete("prevCursor");
-      params.set("scope", exportScope);
+      params.set("scope", exportScope!);
 
       const accessToken = await getAccessTokenAction();
       if (!accessToken) {
