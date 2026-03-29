@@ -112,10 +112,10 @@ async function resolveLeapfrogContext(): Promise<LeapfrogContext> {
 
       const { data: departmentRows, error: departmentError } = await client
         .from("master_departments")
-        .select("id, name, approver_1")
+        .select("id, name, hod_user_id")
         .eq("is_active", true)
-        .eq("approver_2", financeUserId)
-        .neq("approver_1", financeUserId)
+        .eq("founder_user_id", financeUserId)
+        .neq("hod_user_id", financeUserId)
         .order("created_at", { ascending: false })
         .limit(1);
 
@@ -130,7 +130,7 @@ async function resolveLeapfrogContext(): Promise<LeapfrogContext> {
         );
       }
 
-      const hodUserId = department.approver_1;
+      const hodUserId = department.hod_user_id;
       const { data: hodRows, error: hodError } = await client
         .from("users")
         .select("id, email")
@@ -168,10 +168,10 @@ async function resolveCrossDepartmentHodEscalationContext(): Promise<CrossDepart
 
       const { data: departments, error: departmentsError } = await client
         .from("master_departments")
-        .select("id, name, approver_1, approver_2")
+        .select("id, name, hod_user_id, founder_user_id")
         .eq("is_active", true)
-        .not("approver_1", "is", null)
-        .not("approver_2", "is", null);
+        .not("hod_user_id", "is", null)
+        .not("founder_user_id", "is", null);
 
       if (departmentsError) {
         throw new Error(
@@ -182,13 +182,13 @@ async function resolveCrossDepartmentHodEscalationContext(): Promise<CrossDepart
       const departmentRows = (departments ?? []) as Array<{
         id: string;
         name: string;
-        approver_1: string;
-        approver_2: string;
+        hod_user_id: string;
+        founder_user_id: string;
       }>;
 
       if (departmentRows.length < 2) {
         throw new Error(
-          "At least two active departments with approver_1 and approver_2 are required for cross-department HOD escalation test.",
+          "At least two active departments with hod_user_id and founder_user_id are required for cross-department HOD escalation test.",
         );
       }
 
@@ -203,13 +203,13 @@ async function resolveCrossDepartmentHodEscalationContext(): Promise<CrossDepart
       let submitterDepartment =
         preferredSubmitterDepartment &&
         preferredTargetDepartment &&
-        preferredSubmitterDepartment.approver_1 !== preferredTargetDepartment.approver_1
+        preferredSubmitterDepartment.hod_user_id !== preferredTargetDepartment.hod_user_id
           ? preferredSubmitterDepartment
           : null;
       let targetDepartment =
         preferredSubmitterDepartment &&
         preferredTargetDepartment &&
-        preferredSubmitterDepartment.approver_1 !== preferredTargetDepartment.approver_1
+        preferredSubmitterDepartment.hod_user_id !== preferredTargetDepartment.hod_user_id
           ? preferredTargetDepartment
           : null;
 
@@ -218,8 +218,8 @@ async function resolveCrossDepartmentHodEscalationContext(): Promise<CrossDepart
           const candidate = departmentRows.find(
             (target) =>
               target.id !== source.id &&
-              target.approver_1 !== source.approver_1 &&
-              target.approver_2 !== source.approver_1,
+              target.hod_user_id !== source.hod_user_id &&
+              target.founder_user_id !== source.hod_user_id,
           );
 
           if (candidate) {
@@ -232,14 +232,14 @@ async function resolveCrossDepartmentHodEscalationContext(): Promise<CrossDepart
 
       if (!submitterDepartment || !targetDepartment) {
         throw new Error(
-          "Unable to resolve two departments where submitter is HOD in one department and target department has a different HOD plus an approver_2.",
+          "Unable to resolve two departments where submitter is HOD in one department and target department has a different HOD plus a founder_user_id.",
         );
       }
 
       const userIds = [
-        submitterDepartment.approver_1,
-        targetDepartment.approver_1,
-        targetDepartment.approver_2,
+        submitterDepartment.hod_user_id,
+        targetDepartment.hod_user_id,
+        targetDepartment.founder_user_id,
       ];
       const uniqueUserIds = [...new Set(userIds)];
 
@@ -256,9 +256,9 @@ async function resolveCrossDepartmentHodEscalationContext(): Promise<CrossDepart
       }
 
       const emailByUserId = new Map((userRows ?? []).map((row) => [row.id, row.email]));
-      const submitterHodEmail = emailByUserId.get(submitterDepartment.approver_1);
-      const targetHodEmail = emailByUserId.get(targetDepartment.approver_1);
-      const targetApprover2Email = emailByUserId.get(targetDepartment.approver_2);
+      const submitterHodEmail = emailByUserId.get(submitterDepartment.hod_user_id);
+      const targetHodEmail = emailByUserId.get(targetDepartment.hod_user_id);
+      const targetApprover2Email = emailByUserId.get(targetDepartment.founder_user_id);
 
       if (!submitterHodEmail || !targetHodEmail || !targetApprover2Email) {
         throw new Error(
@@ -269,13 +269,13 @@ async function resolveCrossDepartmentHodEscalationContext(): Promise<CrossDepart
       return {
         submitterDepartmentId: submitterDepartment.id,
         submitterDepartmentName: submitterDepartment.name,
-        submitterHodUserId: submitterDepartment.approver_1,
+        submitterHodUserId: submitterDepartment.hod_user_id,
         submitterHodEmail,
         targetDepartmentId: targetDepartment.id,
         targetDepartmentName: targetDepartment.name,
-        targetHodUserId: targetDepartment.approver_1,
+        targetHodUserId: targetDepartment.hod_user_id,
         targetHodEmail,
-        targetApprover2UserId: targetDepartment.approver_2,
+        targetApprover2UserId: targetDepartment.founder_user_id,
         targetApprover2Email,
       };
     })();
@@ -307,10 +307,10 @@ async function resolveProxyFounderContext(): Promise<ProxyFounderContext> {
 
       const { data: departmentRows, error: departmentError } = await client
         .from("master_departments")
-        .select("id, name, approver_1, approver_2")
+        .select("id, name, hod_user_id, founder_user_id")
         .eq("is_active", true)
-        .eq("approver_2", founder.id)
-        .not("approver_1", "is", null)
+        .eq("founder_user_id", founder.id)
+        .not("hod_user_id", "is", null)
         .limit(1);
 
       if (departmentError) {
@@ -318,7 +318,7 @@ async function resolveProxyFounderContext(): Promise<ProxyFounderContext> {
       }
 
       const department = departmentRows?.[0];
-      if (!department?.id || !department?.name || !department?.approver_2) {
+      if (!department?.id || !department?.name || !department?.founder_user_id) {
         throw new Error(
           "No active department found where founder is configured as the senior approver.",
         );
@@ -329,7 +329,7 @@ async function resolveProxyFounderContext(): Promise<ProxyFounderContext> {
         departmentName: department.name,
         founderUserId: founder.id,
         founderEmail: founder.email,
-        seniorApproverUserId: department.approver_2,
+        seniorApproverUserId: department.founder_user_id,
       };
     })();
   }
@@ -362,6 +362,84 @@ async function getClaimRouting(
     status: row.status,
     departmentId: row.department_id,
   };
+}
+
+async function resolveClaimIdByAdvancePurpose(purpose: string): Promise<string> {
+  const client = getAdminSupabaseClient();
+
+  await expect
+    .poll(
+      async () => {
+        const { data, error } = await client
+          .from("claims")
+          .select("id, advance_details!inner(purpose)")
+          .eq("advance_details.purpose", purpose)
+          .eq("is_active", true)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (error) {
+          throw new Error(`Failed to resolve claim id for purpose ${purpose}: ${error.message}`);
+        }
+
+        return data?.id ?? null;
+      },
+      {
+        timeout: 45000,
+        message: `waiting for claim id by purpose ${purpose}`,
+      },
+    )
+    .not.toBeNull();
+
+  const { data, error } = await client
+    .from("claims")
+    .select("id, advance_details!inner(purpose)")
+    .eq("advance_details.purpose", purpose)
+    .eq("is_active", true)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error || !data?.id) {
+    throw new Error(error?.message ?? `No claim found for advance purpose ${purpose}.`);
+  }
+
+  return data.id as string;
+}
+
+async function waitForClaimInTableWithRetry(page: Page, targetClaimId: string): Promise<void> {
+  await expect(page.locator(".animate-pulse")).not.toBeVisible({ timeout: 15000 });
+
+  const waitForTargetRow = async (timeout: number): Promise<void> => {
+    await page.waitForFunction(
+      (claimId: string) => {
+        const tableBodies = Array.from(document.querySelectorAll("tbody"));
+
+        return tableBodies.some((tableBody) => {
+          const rows = Array.from(tableBody.querySelectorAll("tr"));
+          if (rows.length === 0) {
+            return false;
+          }
+
+          return rows.some((row) => (row.textContent ?? "").includes(claimId));
+        });
+      },
+      targetClaimId,
+      { timeout },
+    );
+  };
+
+  try {
+    await waitForTargetRow(5000);
+    return;
+  } catch {
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await expect(page.locator(".animate-pulse")).not.toBeVisible({ timeout: 15000 });
+    await page.waitForTimeout(2000);
+  }
+
+  await waitForTargetRow(30000);
 }
 
 function parseCurrency(value: string): number {
@@ -546,42 +624,61 @@ async function submitPettyCashRequest(
   const submitButton = page.getByRole("button", { name: /submit claim/i });
   await submitButton.click();
 
-  await Promise.race([
-    page
-      .locator("[data-sonner-toast]", { hasText: /success|submitted/i })
-      .waitFor({ state: "visible", timeout: 15000 }),
-    page
-      .locator(".text-destructive")
-      .first()
-      .waitFor({ state: "visible", timeout: 5000 })
-      .then(async () => {
-        throw new Error(
-          `ZOD ERROR: ${await page.locator(".text-destructive").first().innerText()}`,
-        );
-      }),
-    page
-      .locator('[data-sonner-toast][data-type="error"]')
-      .first()
-      .waitFor({ state: "visible", timeout: 5000 })
-      .then(async () => {
-        throw new Error(
-          `BACKEND ERROR: ${await page.locator('[data-sonner-toast][data-type="error"]').first().innerText()}`,
-        );
-      }),
-  ]);
+  await expect
+    .poll(
+      async () => {
+        const zodError = page.locator(".text-destructive").first();
+        if (await zodError.isVisible().catch(() => false)) {
+          throw new Error(`ZOD ERROR: ${await zodError.innerText()}`);
+        }
 
-  await page.goto("/dashboard/my-claims", { waitUntil: "domcontentloaded" });
-  const firstClaimLink = page.locator("tbody tr td a").first();
-  await expect(firstClaimLink).toBeVisible({ timeout: 30000 });
+        const backendErrorToast = page.locator('[data-sonner-toast][data-type="error"]').first();
+        if (await backendErrorToast.isVisible().catch(() => false)) {
+          throw new Error(`BACKEND ERROR: ${await backendErrorToast.innerText()}`);
+        }
 
-  const claimIdFromTable = (await firstClaimLink.innerText()).trim();
+        const successToast = page
+          .locator("[data-sonner-toast]", { hasText: /success|submitted/i })
+          .first();
+        return successToast.isVisible().catch(() => false);
+      },
+      {
+        timeout: 15000,
+        message: "waiting for successful submission toast without validation/backend errors",
+      },
+    )
+    .toBe(true);
+
+  const claimIdFromDb = await resolveClaimIdByAdvancePurpose(input.purpose);
+  const params = new URLSearchParams({
+    view: "submissions",
+    status: "all",
+    search_field: "claim_id",
+    search_query: claimIdFromDb,
+  });
+
+  await page.goto(`/dashboard/my-claims?${params.toString()}`, { waitUntil: "domcontentloaded" });
+  await expect(page.locator(".animate-pulse")).not.toBeVisible({ timeout: 10000 });
+  await waitForClaimInTableWithRetry(page, claimIdFromDb);
+  const claimLink = page.getByRole("link", { name: claimIdFromDb }).first();
+  await expect(claimLink).toBeVisible({ timeout: 30000 });
+
+  const claimIdFromTable = (await claimLink.innerText()).trim();
+  expect(claimIdFromTable).toBe(claimIdFromDb);
   expect(claimIdFromTable).toMatch(SEMANTIC_CLAIM_ID_REGEX);
   console.info(`SEMANTIC_ID_MAP ${input.purpose} => ${claimIdFromTable}`);
-  return { claimId: claimIdFromTable, hodEmail: resolvedHodEmail };
+  return { claimId: claimIdFromDb, hodEmail: resolvedHodEmail };
 }
 
-async function openApprovalsPage(page: Page): Promise<void> {
-  await page.goto("/dashboard/my-claims?view=approvals", { waitUntil: "domcontentloaded" });
+async function openApprovalsPage(page: Page, claimId?: string): Promise<void> {
+  const params = new URLSearchParams({ view: "approvals", status: "all" });
+  if (claimId) {
+    params.set("search_field", "claim_id");
+    params.set("search_query", claimId);
+  }
+
+  await page.goto(`/dashboard/my-claims?${params.toString()}`, { waitUntil: "domcontentloaded" });
+  await expect(page.locator(".animate-pulse")).not.toBeVisible({ timeout: 15000 });
   await expect(page.getByRole("heading", { name: /approvals history/i })).toBeVisible();
 }
 
@@ -594,7 +691,10 @@ async function expectClaimVisibleInApprovals(
   claimId: string,
   visible: boolean,
 ): Promise<void> {
-  await openApprovalsPage(page);
+  await openApprovalsPage(page, claimId);
+  if (visible) {
+    await waitForClaimInTableWithRetry(page, claimId);
+  }
   const row = await getClaimRow(page, claimId);
 
   if (visible) {
@@ -610,7 +710,18 @@ async function expectClaimVisibleInMyClaims(
   claimId: string,
   visible: boolean,
 ): Promise<void> {
-  await page.goto("/dashboard/my-claims", { waitUntil: "domcontentloaded" });
+  const params = new URLSearchParams({
+    view: "submissions",
+    status: "all",
+    search_field: "claim_id",
+    search_query: claimId,
+  });
+
+  await page.goto(`/dashboard/my-claims?${params.toString()}`, { waitUntil: "domcontentloaded" });
+  await expect(page.locator(".animate-pulse")).not.toBeVisible({ timeout: 15000 });
+  if (visible) {
+    await waitForClaimInTableWithRetry(page, claimId);
+  }
   const row = await getClaimRow(page, claimId);
 
   if (visible) {
