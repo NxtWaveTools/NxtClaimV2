@@ -123,6 +123,8 @@ type GetPendingApprovalsRow = {
   status: DbClaimStatus;
   submitted_at: string;
   created_at: string;
+  hod_action_at: string | null;
+  finance_action_at: string | null;
   submitter_user: ClaimSubmitterRow | ClaimSubmitterRow[] | null;
   master_departments: ClaimRelationNameRow | ClaimRelationNameRow[] | null;
   master_payment_modes: ClaimRelationNameRow | ClaimRelationNameRow[] | null;
@@ -452,6 +454,18 @@ function normalizeSearchInput(filters?: GetMyClaimsFilters): {
   };
 }
 
+function resolveEnterpriseDateColumn(dateTarget?: ClaimDateTarget): string {
+  if (dateTarget === "hod_action") return "hod_action_date";
+  if (dateTarget === "finance_closed") return "finance_action_date";
+  return "submitted_on";
+}
+
+function resolvePendingApprovalsDateColumn(dateTarget?: ClaimDateTarget): string {
+  if (dateTarget === "hod_action") return "hod_action_at";
+  if (dateTarget === "finance_closed") return "updated_at";
+  return "submitted_at";
+}
+
 type EnterpriseDashboardQueryChain<TQuery> = {
   eq(column: string, value: string): TQuery;
   in(column: string, values: DbClaimStatus[]): TQuery;
@@ -505,15 +519,17 @@ function applyEnterpriseDashboardFilters<
     query = query.not("finance_action_date", "is", null);
   }
 
+  if (params.filters?.dateTarget === "hod_action") {
+    query = query.not("hod_action_date", "is", null);
+  }
+
   if (params.fromDate) {
-    const column =
-      params.filters?.dateTarget === "finance_closed" ? "finance_action_date" : "submitted_on";
+    const column = resolveEnterpriseDateColumn(params.filters?.dateTarget);
     query = query.gte(column, `${params.fromDate}T00:00:00.000Z`);
   }
 
   if (params.toDate) {
-    const column =
-      params.filters?.dateTarget === "finance_closed" ? "finance_action_date" : "submitted_on";
+    const column = resolveEnterpriseDateColumn(params.filters?.dateTarget);
     query = query.lte(column, `${params.toDate}T23:59:59.999Z`);
   }
 
@@ -575,6 +591,10 @@ function applyPendingApprovalsFilters<TQuery extends PendingApprovalsQueryChain<
 
   if (params.filters?.dateTarget === "finance_closed") {
     query = query.in("status", FINANCE_CLOSED_STATUSES);
+  }
+
+  if (params.filters?.dateTarget === "hod_action") {
+    query = query.not("hod_action_at", "is", null);
   }
 
   if (params.fromDate) {
@@ -639,6 +659,8 @@ function mapPendingApprovalRows(rows: GetPendingApprovalsRow[]) {
       totalAmount: toNumber(expense?.total_amount) ?? toNumber(advance?.requested_amount) ?? 0,
       status: row.status,
       submittedAt: row.submitted_at,
+      hodActionAt: row.hod_action_at ?? null,
+      financeActionAt: row.finance_action_at ?? null,
     };
   });
 }
@@ -938,7 +960,7 @@ export class SupabaseClaimRepository implements ClaimRepository {
     const client = getServiceRoleSupabaseClient();
     const normalizedStatuses = normalizeStatusFilter(filters?.status);
     const { fromDate, toDate } = normalizeDateRange(filters);
-    const dateColumn = filters?.dateTarget === "finance_closed" ? "updated_at" : "submitted_at";
+    const dateColumn = resolvePendingApprovalsDateColumn(filters?.dateTarget);
     const normalizedSearch = normalizeSearchInput(filters);
 
     if (filters?.dateTarget === "finance_closed") {
@@ -2125,7 +2147,7 @@ export class SupabaseClaimRepository implements ClaimRepository {
     const client = getServiceRoleSupabaseClient();
     const normalizedStatuses = normalizeStatusFilter(filters?.status);
     const { fromDate, toDate } = normalizeDateRange(filters);
-    const dateColumn = filters?.dateTarget === "finance_closed" ? "updated_at" : "submitted_at";
+    const dateColumn = resolvePendingApprovalsDateColumn(filters?.dateTarget);
     const normalizedSearch = normalizeSearchInput(filters);
 
     const needsExpenseInnerJoin =
@@ -2378,7 +2400,7 @@ export class SupabaseClaimRepository implements ClaimRepository {
     const decodedCursor = decodeClaimsCursor(cursor);
     const normalizedStatuses = normalizeStatusFilter(filters?.status);
     const { fromDate, toDate } = normalizeDateRange(filters);
-    const dateColumn = filters?.dateTarget === "finance_closed" ? "updated_at" : "submitted_at";
+    const dateColumn = resolvePendingApprovalsDateColumn(filters?.dateTarget);
     const normalizedSearch = normalizeSearchInput(filters);
     const safeLimit = clampListPageSize(limit);
 
@@ -2402,7 +2424,7 @@ export class SupabaseClaimRepository implements ClaimRepository {
     let query = client
       .from("claims")
       .select(
-        `id, employee_id, detail_type, submission_type, on_behalf_email, status, submitted_at, created_at, submitter_user:users!claims_submitted_by_fkey!inner(full_name), master_departments(name), master_payment_modes(name), ${expenseDetailsJoin}, advance_details(requested_amount, purpose, supporting_document_path)`,
+        `id, employee_id, detail_type, submission_type, on_behalf_email, status, submitted_at, created_at, hod_action_at, finance_action_at, submitter_user:users!claims_submitted_by_fkey!inner(full_name, email), master_departments(name), master_payment_modes(name), ${expenseDetailsJoin}, advance_details(requested_amount, purpose, supporting_document_path)`,
         { count: "exact" },
       )
       .eq("assigned_l1_approver_id", userId)
@@ -2490,7 +2512,7 @@ export class SupabaseClaimRepository implements ClaimRepository {
     const decodedCursor = decodeClaimsCursor(cursor);
     const normalizedStatuses = normalizeStatusFilter(filters?.status);
     const { fromDate, toDate } = normalizeDateRange(filters);
-    const dateColumn = filters?.dateTarget === "finance_closed" ? "updated_at" : "submitted_at";
+    const dateColumn = resolvePendingApprovalsDateColumn(filters?.dateTarget);
     const normalizedSearch = normalizeSearchInput(filters);
     const safeLimit = clampListPageSize(limit);
 
@@ -2518,7 +2540,7 @@ export class SupabaseClaimRepository implements ClaimRepository {
     let query = client
       .from("claims")
       .select(
-        `id, employee_id, detail_type, submission_type, on_behalf_email, status, submitted_at, created_at, submitter_user:users!claims_submitted_by_fkey!inner(full_name), master_departments(name), master_payment_modes(name), ${expenseDetailsJoin}, advance_details(requested_amount, purpose, supporting_document_path)`,
+        `id, employee_id, detail_type, submission_type, on_behalf_email, status, submitted_at, created_at, hod_action_at, finance_action_at, submitter_user:users!claims_submitted_by_fkey!inner(full_name, email), master_departments(name), master_payment_modes(name), ${expenseDetailsJoin}, advance_details(requested_amount, purpose, supporting_document_path)`,
         { count: "exact" },
       )
       .or(
