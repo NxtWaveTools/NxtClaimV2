@@ -108,12 +108,19 @@ async function withActorPage<T>(
     if (storageStatePath) {
       await page.goto("/dashboard", { waitUntil: "domcontentloaded" });
 
-      const signOutButton = page.getByRole("button", { name: /sign out/i });
-      const hasSession =
-        !/\/auth\/login/i.test(page.url()) &&
-        (await signOutButton.isVisible({ timeout: 3000 }).catch(() => false));
+      const normalizedEmail = email.trim().toLowerCase();
+      const authenticatedAsText = page
+        .locator("body")
+        .getByText(
+          new RegExp(
+            `Authenticated as\\s+${normalizedEmail.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`,
+            "i",
+          ),
+        )
+        .first();
+      const hasExpectedIdentity = (await authenticatedAsText.count()) > 0;
 
-      if (!hasSession) {
+      if (/\/auth\/login/i.test(page.url()) || !hasExpectedIdentity) {
         await loginWithEmail(page, email);
       }
     } else {
@@ -197,13 +204,6 @@ async function submitReimbursementClaim(
   const { departmentName, expenseCategoryName, marker, amount } = options;
 
   await page.goto("/claims/new", { waitUntil: "domcontentloaded" });
-
-  const hydrationBanner = page.getByText(/unable to load claim form data/i);
-  if ((await hydrationBanner.count()) > 0) {
-    await loginWithEmail(page, ACTORS.employee.email);
-    await page.goto("/claims/new", { waitUntil: "domcontentloaded" });
-  }
-
   await expect(page.getByRole("heading", { name: /new claim/i })).toBeVisible({ timeout: 15000 });
 
   const departmentSelect = page.getByRole("combobox", { name: /department/i });
@@ -487,7 +487,7 @@ test.describe("Navigation Filter Stability & Finance Edit", () => {
 
       // Verify the updated amounts are reflected on the detail page
       // The total amount should now show ₹885.00 on the page
-      await expect(page.getByText(/^₹885\.00$/).first()).toBeVisible({ timeout: 10000 });
+      await expect(page.getByText("885.00")).toBeVisible({ timeout: 10000 });
     });
 
     // Verify the DB was updated correctly

@@ -20,7 +20,6 @@ const SAMPLE_ADMIN: AdminRecord = {
   email: "alice@example.com",
   fullName: "Alice Admin",
   createdAt: "2026-03-14T10:00:00.000Z",
-  provisionalEmail: null,
 };
 
 const SAMPLE_USER: AdminUserRecord = {
@@ -55,7 +54,7 @@ function createRepository(overrides?: Partial<AdminRepository>): AdminRepository
     getAllUsers: jest.fn(async () => ({ data: PAGINATED_USERS, errorMessage: null })),
     updateUserRole: jest.fn(async () => ({ success: true, errorMessage: null })),
     getAdmins: jest.fn(async () => ({ data: [SAMPLE_ADMIN], errorMessage: null })),
-    addAdminByEmail: jest.fn(async () => ({ data: SAMPLE_ADMIN, errorMessage: null })),
+    addAdmin: jest.fn(async () => ({ data: SAMPLE_ADMIN, errorMessage: null })),
     removeAdmin: jest.fn(async () => ({ success: true, errorMessage: null })),
     ...overrides,
   };
@@ -128,36 +127,36 @@ describe("ManageAdminsService", () => {
     });
   });
 
-  describe("addAdminByEmail", () => {
+  describe("addAdmin", () => {
     test("calls repo and returns new admin record", async () => {
       const repository = createRepository();
       const service = new ManageAdminsService({ repository, logger: createLogger() });
 
-      const result = await service.addAdminByEmail("alice@example.com");
+      const result = await service.addAdmin("user-admin-1");
 
-      expect(repository.addAdminByEmail).toHaveBeenCalledWith("alice@example.com");
+      expect(repository.addAdmin).toHaveBeenCalledWith("user-admin-1");
       expect(result.errorCode).toBeNull();
-      expect(result.data?.email).toBe("alice@example.com");
+      expect(result.data?.userId).toBe("user-admin-1");
     });
 
-    test("returns INVALID_INPUT for empty email", async () => {
+    test("returns INVALID_INPUT for empty userId", async () => {
       const repository = createRepository();
       const service = new ManageAdminsService({ repository, logger: createLogger() });
 
-      const result = await service.addAdminByEmail("  ");
+      const result = await service.addAdmin("  ");
 
-      expect(repository.addAdminByEmail).not.toHaveBeenCalled();
+      expect(repository.addAdmin).not.toHaveBeenCalled();
       expect(result.data).toBeNull();
       expect(result.errorCode).toBe("INVALID_INPUT");
     });
 
     test("returns ADD_FAILED on repo error", async () => {
       const repository = createRepository({
-        addAdminByEmail: jest.fn(async () => ({ data: null, errorMessage: "Already an admin" })),
+        addAdmin: jest.fn(async () => ({ data: null, errorMessage: "Already an admin" })),
       });
       const service = new ManageAdminsService({ repository, logger: createLogger() });
 
-      const result = await service.addAdminByEmail("alice@example.com");
+      const result = await service.addAdmin("user-admin-1");
 
       expect(result.data).toBeNull();
       expect(result.errorCode).toBe("ADD_FAILED");

@@ -328,24 +328,7 @@ export async function getClaimFormHydrationAction(): Promise<{
     };
   }
 
-  const [
-    userSummaryResult,
-    globalHodResult,
-    departmentsResult,
-    paymentModesResult,
-    expenseCategoriesResult,
-    productsResult,
-    locationsResult,
-  ] = await Promise.all([
-    repository.getUserSummary(currentUserResult.user.id),
-    repository.isUserApprover1InAnyDepartment(currentUserResult.user.id),
-    activeDepartmentsService.execute(),
-    repository.getActivePaymentModes(),
-    repository.getActiveExpenseCategories(),
-    repository.getActiveProducts(),
-    repository.getActiveLocations(),
-  ]);
-
+  const userSummaryResult = await repository.getUserSummary(currentUserResult.user.id);
   if (userSummaryResult.errorMessage) {
     return {
       data: null,
@@ -361,12 +344,29 @@ export async function getClaimFormHydrationAction(): Promise<{
       fullName: null,
     } as const);
 
+  const globalHodResult = await repository.isUserApprover1InAnyDepartment(
+    currentUserResult.user.id,
+  );
   if (globalHodResult.errorMessage) {
     return {
       data: null,
       errorMessage: globalHodResult.errorMessage,
     };
   }
+
+  const [
+    departmentsResult,
+    paymentModesResult,
+    expenseCategoriesResult,
+    productsResult,
+    locationsResult,
+  ] = await Promise.all([
+    activeDepartmentsService.execute(),
+    repository.getActivePaymentModes(),
+    repository.getActiveExpenseCategories(),
+    repository.getActiveProducts(),
+    repository.getActiveLocations(),
+  ]);
 
   const firstError =
     departmentsResult.errorMessage ??

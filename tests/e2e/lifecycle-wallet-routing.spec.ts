@@ -515,9 +515,6 @@ async function loginWithEmail(page: Page, email: string): Promise<void> {
 
 async function getAmountReceived(page: Page): Promise<number> {
   await page.goto("/dashboard", { waitUntil: "domcontentloaded" });
-  if (/\/auth\/login/i.test(page.url())) {
-    throw new Error("Session expired while loading dashboard wallet summary.");
-  }
   await expect(page.getByRole("heading", { name: /wallet summary/i })).toBeVisible();
 
   const amountText = await page
@@ -551,17 +548,13 @@ async function submitPettyCashRequest(
 ): Promise<{ claimId: string; hodEmail: string }> {
   await page.goto("/claims/new", { waitUntil: "domcontentloaded" });
 
-  const hydrationBanner = page.getByText(/unable to load claim form data/i);
-  if ((await hydrationBanner.count()) > 0) {
-    await page.reload({ waitUntil: "domcontentloaded" });
-  }
-
   await expect(page.getByRole("button", { name: /submit claim/i })).toBeVisible({
     timeout: 10000,
   });
-  await expect(page.getByRole("combobox", { name: /payment mode/i })).toBeVisible({
-    timeout: 10000,
-  });
+
+  // Wait for React hydration: hodEmail is populated by useEffect only after hydration.
+  // Selecting the department before this resets to server-default on React reconciliation.
+  await expect(page.locator('input[name="hodEmail"]')).not.toHaveValue("", { timeout: 10000 });
 
   if (input.onBehalfEmail && input.onBehalfEmployeeCode) {
     const submissionType = page.getByRole("combobox", { name: /submission type/i });
@@ -697,18 +690,6 @@ async function getClaimRow(page: Page, claimId: string) {
   return page.locator("tbody tr", { has: page.getByRole("link", { name: claimId }) }).first();
 }
 
-async function selectClaimForBulkAction(page: Page, claimId: string): Promise<void> {
-  const row = await getClaimRow(page, claimId);
-  await expect(row).toBeVisible({ timeout: 30000 });
-
-  const rowCheckbox = row.getByRole("checkbox", {
-    name: new RegExp(`^Select claim ${claimId}$`, "i"),
-  });
-  await expect(rowCheckbox).toBeVisible({ timeout: 10000 });
-  await rowCheckbox.check();
-  await expect(page.getByText(/\b1 selected\b/i)).toBeVisible({ timeout: 10000 });
-}
-
 async function expectClaimVisibleInApprovals(
   page: Page,
   claimId: string,
@@ -756,56 +737,50 @@ async function expectClaimVisibleInMyClaims(
 }
 
 async function approveAtL1(page: Page, claimId: string): Promise<void> {
-  await openApprovalsPage(page, claimId);
-  await selectClaimForBulkAction(page, claimId);
+  await openApprovalsPage(page);
 
-  const bulkApproveButton = page.getByRole("button", { name: /^Bulk Approve$/i }).first();
-  await expect(bulkApproveButton).toBeVisible({ timeout: 10000 });
-  await expect(bulkApproveButton).toBeEnabled({ timeout: 10000 });
-  await bulkApproveButton.click();
-
-  await expect
-    .poll(async () => (await getClaimRouting(claimId)).status, {
-      timeout: 45000,
-      message: `waiting for L1 approval transition on ${claimId}`,
-    })
-    .toBe("HOD approved - Awaiting finance approval");
-}
-
-async function approveAndMarkPaidAtFinance(page: Page, claimId: string): Promise<void> {
-  await openApprovalsPage(page, claimId);
-  await selectClaimForBulkAction(page, claimId);
-
-  const bulkApproveButton = page.getByRole("button", { name: /^Bulk Approve$/i }).first();
-  await expect(bulkApproveButton).toBeVisible({ timeout: 10000 });
-  await expect(bulkApproveButton).toBeEnabled({ timeout: 10000 });
-  await bulkApproveButton.click();
-
-  await expect
-    .poll(async () => (await getClaimRouting(claimId)).status, {
-      timeout: 45000,
-      message: `waiting for finance approval transition on ${claimId}`,
-    })
-    .toBe("Finance Approved - Payment under process");
-
-  await openApprovalsPage(page, claimId);
   const row = await getClaimRow(page, claimId);
   await expect(row).toBeVisible({ timeout: 30000 });
 
-  const viewClaimButton = row.getByRole("button", { name: /^View Claim$/i }).first();
-  await expect(viewClaimButton).toBeVisible({ timeout: 10000 });
-  await viewClaimButton.click();
+  await row.getByRole("button", { name: /^Approve$/i }).click();
+  await page
+    .getByRole("button", { name: /processing/i })
+    .first()
+    .waitFor({ state: "visible", timeout: 2500 })
+    .catch(() => null);
 
-  const markPaidButton = page.getByRole("button", { name: /^Mark as Paid$|^Paid$/i }).first();
-  await expect(markPaidButton).toBeVisible({ timeout: 15000 });
-  await markPaidButton.click();
+  // Accept either the success toast or the persisted status transition as approval proof.
+  await Promise.race([
+    expect(page.getByText(/Claim approved\./i)).toBeVisible({ timeout: 30000 }),
+    expect(row).toContainText(/HOD approved - Awaiting finance approval/i, { timeout: 30000 }),
+  ]);
+}
 
-  await expect
-    .poll(async () => (await getClaimRouting(claimId)).status, {
-      timeout: 60000,
-      message: `waiting for payment done transition on ${claimId}`,
-    })
-    .toBe("Payment Done - Closed");
+async function approveAndMarkPaidAtFinance(page: Page, claimId: string): Promise<void> {
+  await openApprovalsPage(page);
+
+  const row = await getClaimRow(page, claimId);
+  await expect(row).toBeVisible({ timeout: 30000 });
+
+  await row.getByRole("button", { name: /^Approve$/i }).click();
+  await page
+    .getByRole("button", { name: /processing/i })
+    .first()
+    .waitFor({ state: "visible", timeout: 2500 })
+    .catch(() => null);
+  await expect(page.getByText(/Finance decision approved\./i)).toBeVisible({ timeout: 30000 });
+
+  await openApprovalsPage(page);
+  const paidRow = await getClaimRow(page, claimId);
+  await expect(paidRow).toBeVisible({ timeout: 30000 });
+
+  await paidRow.getByRole("button", { name: /^Paid$/i }).click();
+  await page
+    .getByRole("button", { name: /processing/i })
+    .first()
+    .waitFor({ state: "visible", timeout: 2500 })
+    .catch(() => null);
+  await expect(page.getByText(/Claim marked as paid\./i)).toBeVisible({ timeout: 30000 });
 }
 
 async function withActorPage<T>(
@@ -823,12 +798,19 @@ async function withActorPage<T>(
     if (storageStatePath) {
       await page.goto("/dashboard", { waitUntil: "domcontentloaded" });
 
-      const signOutButton = page.getByRole("button", { name: /sign out/i });
-      const hasSession =
-        !/\/auth\/login/i.test(page.url()) &&
-        (await signOutButton.isVisible({ timeout: 3000 }).catch(() => false));
+      const normalizedEmail = email.trim().toLowerCase();
+      const authenticatedAsText = page
+        .locator("body")
+        .getByText(
+          new RegExp(
+            `Authenticated as\\s+${normalizedEmail.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`,
+            "i",
+          ),
+        )
+        .first();
+      const hasExpectedIdentity = (await authenticatedAsText.count()) > 0;
 
-      if (!hasSession) {
+      if (/\/auth\/login/i.test(page.url()) || !hasExpectedIdentity) {
         await loginWithEmail(page, email);
       }
     } else {

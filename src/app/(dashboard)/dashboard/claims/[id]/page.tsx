@@ -1,6 +1,6 @@
 import Image from "next/image";
 import Link from "next/link";
-import dynamic from "next/dynamic";
+import { Inter, Plus_Jakarta_Sans } from "next/font/google";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import { ExternalLink } from "lucide-react";
@@ -8,7 +8,7 @@ import { AppShellHeader } from "@/components/app-shell-header";
 import { BackButton } from "@/components/ui/back-button";
 import { ROUTES } from "@/core/config/route-registry";
 import { DB_CLAIM_STATUSES } from "@/core/constants/statuses";
-import { getCachedCurrentUser } from "@/modules/auth/server/get-current-user";
+import { SupabaseServerAuthRepository } from "@/modules/auth/repositories/supabase-server-auth.repository";
 import {
   approveClaimAction,
   approveFinanceAction,
@@ -21,9 +21,9 @@ import { SupabaseClaimRepository } from "@/modules/claims/repositories/SupabaseC
 import { ClaimRejectWithReasonForm } from "@/modules/claims/ui/claim-reject-with-reason-form";
 import { ClaimDecisionActionForm } from "@/modules/claims/ui/claim-decision-action-form";
 import { ClaimStatusBadge } from "@/modules/claims/ui/claim-status-badge";
+import { FinanceEditClaimForm } from "@/modules/claims/ui/finance-edit-claim-form";
 import { ClaimAuditTimeline } from "@/modules/claims/ui/claim-audit-timeline";
-import { formatDate, formatDateTime } from "@/lib/format";
-import { pageBodyFont, pageDisplayFont } from "@/lib/fonts";
+import { formatDateTime } from "@/lib/format";
 import {
   getAvailableClaimActions,
   type ClaimActionRole,
@@ -32,15 +32,15 @@ import { isAdmin } from "@/modules/admin/server/is-admin";
 import { getViewerDepartmentIds } from "@/modules/claims/server/is-department-viewer";
 import { AdminSoftDeletePanel } from "@/modules/admin/ui/admin-soft-delete-panel";
 
-const FinanceEditClaimForm = dynamic(
-  () =>
-    import("@/modules/claims/ui/finance-edit-claim-form").then((mod) => mod.FinanceEditClaimForm),
-  {
-    loading: () => (
-      <div className="h-96 animate-pulse rounded-xl bg-zinc-200 dark:bg-gray-800/40" />
-    ),
-  },
-);
+const pageBodyFont = Inter({
+  subsets: ["latin"],
+  variable: "--font-dashboard-inter",
+});
+
+const pageDisplayFont = Plus_Jakarta_Sans({
+  subsets: ["latin"],
+  variable: "--font-dashboard-display",
+});
 
 type PageProps = {
   params: Promise<{ id: string }>;
@@ -62,19 +62,34 @@ type ClaimDetailRecord = NonNullable<
   Awaited<ReturnType<SupabaseClaimRepository["getClaimDetailById"]>>["data"]
 >;
 
-const indiaAmountFormatter = new Intl.NumberFormat("en-IN", {
-  style: "currency",
-  currency: "INR",
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
-});
+function formatDate(value: string | null): string {
+  if (!value) {
+    return "N/A";
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return "N/A";
+  }
+
+  return new Intl.DateTimeFormat("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  }).format(parsed);
+}
 
 function formatAmount(amount: number | null): string {
   if (amount === null) {
     return "N/A";
   }
 
-  return indiaAmountFormatter.format(amount);
+  return new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency: "INR",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(amount);
 }
 
 function formatOptionalText(value: string | null | undefined, fallback = "N/A"): string {
@@ -433,10 +448,11 @@ async function EvidenceGallerySection({ evidencePaths }: { evidencePaths: Eviden
 async function ClaimDetailCore({ params }: { params: Promise<{ id: string }> }) {
   const resolvedParams = await params;
   const claimId = resolvedParams.id;
+  const authRepository = new SupabaseServerAuthRepository();
   const claimRepository = new SupabaseClaimRepository();
 
   const [currentUserResult, claimResult, isAdminUser] = await Promise.all([
-    getCachedCurrentUser(),
+    authRepository.getCurrentUser(),
     claimRepository.getClaimDetailById(claimId),
     isAdmin(),
   ]);
@@ -487,10 +503,9 @@ async function ClaimDetailCore({ params }: { params: Promise<{ id: string }> }) 
     claim.expense?.bankStatementFilePath,
     claim.advance?.supportingDocumentPath,
   );
-  const [financeApproverIdsResult, viewerDeptIds] = await Promise.all([
-    claimRepository.getFinanceApproverIdsForUser(currentUserId),
-    getViewerDepartmentIds(currentUserId),
-  ]);
+  const financeApproverIdsResult =
+    await claimRepository.getFinanceApproverIdsForUser(currentUserId);
+  const viewerDeptIds = await getViewerDepartmentIds(currentUserId);
 
   const isFinanceActor =
     !financeApproverIdsResult.errorMessage && financeApproverIdsResult.data.length > 0;
@@ -937,7 +952,8 @@ async function ClaimDetailCore({ params }: { params: Promise<{ id: string }> }) 
 }
 
 export default async function ClaimDetailPage({ params, searchParams }: PageProps) {
-  const currentUserResult = await getCachedCurrentUser();
+  const authRepository = new SupabaseServerAuthRepository();
+  const currentUserResult = await authRepository.getCurrentUser();
   const currentEmail = currentUserResult.user?.email ?? null;
 
   return (

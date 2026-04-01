@@ -276,7 +276,7 @@ export class SupabaseAdminRepository implements AdminRepository {
       return { success: true, errorMessage: null };
     }
 
-    // Soft-delete claim header
+    // Soft-delete
     const { error: updateError } = await this.client
       .from("claims")
       .update({ is_active: false })
@@ -284,27 +284,6 @@ export class SupabaseAdminRepository implements AdminRepository {
 
     if (updateError) {
       return { success: false, errorMessage: updateError.message };
-    }
-
-    // Cascade soft-delete to detail rows so the partial unique index
-    // (uq_expense_details_active_bill WHERE is_active = true) releases the
-    // slot, allowing the user to re-upload the same receipt after deletion.
-    const { error: expenseDetailError } = await this.client
-      .from("expense_details")
-      .update({ is_active: false })
-      .eq("claim_id", claimId);
-
-    if (expenseDetailError) {
-      return { success: false, errorMessage: expenseDetailError.message };
-    }
-
-    const { error: advanceDetailError } = await this.client
-      .from("advance_details")
-      .update({ is_active: false })
-      .eq("claim_id", claimId);
-
-    if (advanceDetailError) {
-      return { success: false, errorMessage: advanceDetailError.message };
     }
 
     // Write audit log

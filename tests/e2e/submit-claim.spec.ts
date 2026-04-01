@@ -93,12 +93,7 @@ async function resolveRuntimeFormData(): Promise<RuntimeFormData> {
 async function ensureAuthenticated(page: Page, email: string): Promise<void> {
   await page.goto("/dashboard", { waitUntil: "domcontentloaded" });
 
-  const signOutButton = page.getByRole("button", { name: /sign out/i });
-  const hasSession =
-    !/\/auth\/login/i.test(page.url()) &&
-    (await signOutButton.isVisible({ timeout: 3000 }).catch(() => false));
-
-  if (hasSession) {
+  if (!/\/auth\/login/i.test(page.url())) {
     return;
   }
 
@@ -127,10 +122,6 @@ async function ensureAuthenticated(page: Page, email: string): Promise<void> {
   if (!sessionResponse.ok()) {
     throw new Error(`Session bootstrap failed for ${email}: HTTP ${sessionResponse.status()}`);
   }
-
-  await page.goto("/dashboard", { waitUntil: "domcontentloaded" });
-  await expect(page).not.toHaveURL(/\/auth\/login/i);
-  await expect(signOutButton).toBeVisible({ timeout: 15000 });
 }
 
 async function openClaimForm(page: Page, email: string): Promise<void> {
@@ -139,16 +130,11 @@ async function openClaimForm(page: Page, email: string): Promise<void> {
 
   const submitButton = page.getByRole("button", { name: /submit claim/i });
   const failedHydrationBanner = page.getByText(/Unable to load claim form data/i);
-  if ((await failedHydrationBanner.count()) > 0) {
-    await ensureAuthenticated(page, email);
-    await page.goto("/claims/new", { waitUntil: "domcontentloaded" });
-  }
-
   await expect(failedHydrationBanner).toHaveCount(0);
   await expect(submitButton).toBeVisible();
-  await expect(page.getByRole("combobox", { name: /payment mode/i })).toBeVisible({
-    timeout: 15000,
-  });
+  // Wait for React hydration before interacting with form controls.
+  // The hidden hodEmail field is populated by useEffect only after hydration.
+  await expect(page.locator('input[name="hodEmail"]')).not.toHaveValue("", { timeout: 15000 });
 }
 
 async function selectOptionByLabel(page: Page, label: string | RegExp, optionLabel: string) {

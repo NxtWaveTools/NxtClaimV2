@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Inter, Plus_Jakarta_Sans } from "next/font/google";
 import { notFound } from "next/navigation";
 import {
   ArrowRight,
@@ -26,8 +27,17 @@ import { AdminsManagement } from "@/modules/admin/ui/settings/admins-management"
 import { DepartmentViewersManagement } from "@/modules/admin/ui/settings/department-viewers-management";
 import { BackButton } from "@/components/ui/back-button";
 import type { MasterDataTableName } from "@/core/domain/admin/contracts";
-import { getCachedCurrentUser } from "@/modules/auth/server/get-current-user";
-import { pageBodyFont, pageDisplayFont } from "@/lib/fonts";
+import { SupabaseServerAuthRepository } from "@/modules/auth/repositories/supabase-server-auth.repository";
+
+const pageBodyFont = Inter({
+  subsets: ["latin"],
+  variable: "--font-dashboard-inter",
+});
+
+const pageDisplayFont = Plus_Jakarta_Sans({
+  subsets: ["latin"],
+  variable: "--font-dashboard-display",
+});
 
 export const metadata = {
   title: "System Settings | NxtClaim",
@@ -174,9 +184,10 @@ export default async function AdminSettingsPage({
 }: {
   searchParams: Promise<Record<string, SearchParamsValue>>;
 }) {
+  const authRepository = new SupabaseServerAuthRepository();
   const [adminCheck, currentUserResult, resolvedParams] = await Promise.all([
     isAdmin(),
-    getCachedCurrentUser(),
+    authRepository.getCurrentUser(),
     searchParams,
   ]);
 
@@ -203,15 +214,13 @@ export default async function AdminSettingsPage({
   const masterMeta = MASTER_DATA_MAP[activeTab];
 
   const [
-    adminsResult,
-    viewersResult,
     masterDataResult,
     departmentsResult,
     financeResult,
     usersResult,
+    adminsResult,
+    viewersResult,
   ] = await Promise.all([
-    activeTab === "admins" ? adminsService.getAdmins() : Promise.resolve(null),
-    activeTab === "viewers" ? viewersService.getDepartmentViewers() : Promise.resolve(null),
     isMasterDataTab
       ? masterDataService.getItems({ tableName: masterMeta.tableName })
       : Promise.resolve(null),
@@ -222,6 +231,8 @@ export default async function AdminSettingsPage({
     activeTab === "users"
       ? adminsService.getAllUsers({ cursor, limit: PAGE_SIZE })
       : Promise.resolve(null),
+    activeTab === "admins" ? adminsService.getAdmins() : Promise.resolve(null),
+    activeTab === "viewers" ? viewersService.getDepartmentViewers() : Promise.resolve(null),
   ]);
 
   function tabHref(key: string) {

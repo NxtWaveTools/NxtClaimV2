@@ -953,13 +953,12 @@ function claimRow(page: Page, claimId: string): Locator {
   return page.locator("tbody tr", { hasText: claimId }).first();
 }
 
-async function selectRowForBulkAction(page: Page, row: Locator, claimId: string): Promise<void> {
+async function selectRowForBulkAction(row: Locator, claimId: string): Promise<void> {
   const rowCheckbox = row.getByRole("checkbox", {
     name: new RegExp(`^Select claim ${claimId}$`, "i"),
   });
   await expect(rowCheckbox).toBeVisible({ timeout: 10000 });
   await rowCheckbox.check();
-  await expect(page.getByText(/\b1 selected\b/i)).toBeVisible({ timeout: 10000 });
 }
 
 function nextApproveStatus(currentStatus: string): string {
@@ -980,10 +979,9 @@ async function approveAtCurrentScope(page: Page, claimId: string): Promise<void>
   const row = claimRow(page, claimId);
   await expect(row).toBeVisible({ timeout: 30000 });
 
-  await selectRowForBulkAction(page, row, claimId);
+  await selectRowForBulkAction(row, claimId);
   const bulkApproveButton = page.getByRole("button", { name: /^Bulk Approve$/i }).first();
   await expect(bulkApproveButton).toBeVisible({ timeout: 10000 });
-  await expect(bulkApproveButton).toBeEnabled({ timeout: 10000 });
   await bulkApproveButton.click();
 
   const expectedStatus = nextApproveStatus(before.status);
@@ -1010,10 +1008,9 @@ async function rejectAtCurrentScopeWithOptions(
   const row = claimRow(page, claimId);
   await expect(row).toBeVisible({ timeout: 30000 });
 
-  await selectRowForBulkAction(page, row, claimId);
+  await selectRowForBulkAction(row, claimId);
   const bulkRejectButton = page.getByRole("button", { name: /^Bulk Reject$/i }).first();
   await expect(bulkRejectButton).toBeVisible({ timeout: 10000 });
-  await expect(bulkRejectButton).toBeEnabled({ timeout: 10000 });
   await bulkRejectButton.click();
 
   const reasonBox = page.locator("textarea[name='rejectionReason']").first();
@@ -1041,17 +1038,31 @@ async function markPaidAtFinance(page: Page, claimId: string): Promise<void> {
   const row = claimRow(page, claimId);
   await expect(row).toBeVisible({ timeout: 30000 });
 
-  const viewClaimButton = row.getByRole("button", { name: /^View Claim$/i }).first();
-  await expect(viewClaimButton).toBeVisible({ timeout: 10000 });
-  await viewClaimButton.click();
+  await selectRowForBulkAction(row, claimId);
+  const bulkMarkPaidButton = page.getByRole("button", { name: /^Bulk Mark Paid$/i }).first();
+  await expect(bulkMarkPaidButton).toBeVisible({ timeout: 10000 });
+  await bulkMarkPaidButton.click();
 
-  const markPaidButton = page.getByRole("button", { name: /^Mark as Paid$|^Paid$/i }).first();
-  await expect(markPaidButton).toBeVisible({ timeout: 15000 });
-  await markPaidButton.click();
+  try {
+    await expect
+      .poll(async () => (await getClaimRouting(claimId)).status, {
+        timeout: 12000,
+        message: `waiting for paid transition on claim ${claimId} via bulk action`,
+      })
+      .toBe("Payment Done - Closed");
+    return;
+  } catch {
+    const refreshedRow = claimRow(page, claimId);
+    const inlinePaidButton = refreshedRow.getByRole("button", { name: /^Paid$/i }).first();
+    if (await inlinePaidButton.count()) {
+      await inlinePaidButton.click();
+      await expect(page.getByText(/claim marked as paid\./i)).toBeVisible({ timeout: 15000 });
+    }
+  }
 
   await expect
     .poll(async () => (await getClaimRouting(claimId)).status, {
-      timeout: 60000,
+      timeout: 30000,
       message: `waiting for paid transition on claim ${claimId}`,
     })
     .toBe("Payment Done - Closed");

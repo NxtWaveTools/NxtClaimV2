@@ -284,6 +284,7 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
     igstAmount,
     isGstApplicable,
   );
+  const detailTypeLabel = detailType === "expense" ? "Expense Claim" : "Petty Cash Request";
 
   const selectedDepartment = useMemo(
     () => options.departmentRouting.find((department) => department.id === departmentId) ?? null,
@@ -813,7 +814,7 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
               </div>
             </div>
 
-            <div className="grid grid-cols-1 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div className="grid gap-1">
                 <label
                   htmlFor="paymentModeId"
@@ -835,6 +836,17 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
                 {errors.paymentModeId ? (
                   <p className="text-xs text-rose-600">{errors.paymentModeId.message}</p>
                 ) : null}
+              </div>
+
+              <div className="grid gap-1">
+                <label className="text-xs font-medium text-zinc-600 dark:text-zinc-400">
+                  Claim Type
+                </label>
+                <input
+                  value={detailTypeLabel}
+                  readOnly
+                  className="h-9 rounded-lg border border-zinc-200 bg-zinc-50 px-3 text-sm text-zinc-700 dark:border-zinc-700 dark:bg-zinc-800/50 dark:text-zinc-300"
+                />
               </div>
             </div>
           </section>

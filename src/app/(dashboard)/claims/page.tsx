@@ -5,7 +5,6 @@ import { CLAIM_STATUSES, type ClaimStatus } from "@/core/constants/statuses";
 import { GetMyClaimsService } from "@/core/domain/claims/GetMyClaimsService";
 import type { ClaimSubmissionType, GetMyClaimsFilters } from "@/core/domain/claims/contracts";
 import { logger } from "@/core/infra/logging/logger";
-import { formatDate } from "@/lib/format";
 import { SupabaseServerAuthRepository } from "@/modules/auth/repositories/supabase-server-auth.repository";
 import { SupabaseClaimRepository } from "@/modules/claims/repositories/SupabaseClaimRepository";
 import {
@@ -58,15 +57,26 @@ function normalizeDate(value: string | undefined): string | undefined {
   return value;
 }
 
-const indiaAmountFormatter = new Intl.NumberFormat("en-IN", {
-  style: "currency",
-  currency: "INR",
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
-});
+function formatSubmittedDate(isoDate: string): string {
+  const parsed = new Date(isoDate);
+  if (Number.isNaN(parsed.getTime())) {
+    return "-";
+  }
+
+  return new Intl.DateTimeFormat("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  }).format(parsed);
+}
 
 function formatAmount(amount: number): string {
-  return indiaAmountFormatter.format(amount);
+  return new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency: "INR",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(amount);
 }
 
 export default async function MyClaimsPage({
@@ -344,7 +354,7 @@ export default async function MyClaimsPage({
                         >
                           <ClaimStatusBadge status={claim.status} fullWidth />
                         </td>
-                        <td className="px-5 py-3.5">{formatDate(claim.submittedOn)}</td>
+                        <td className="px-5 py-3.5">{formatSubmittedDate(claim.submittedOn)}</td>
                         <td className="px-5 py-3.5">
                           <span className="inline-flex rounded-xl border border-zinc-300 bg-zinc-50 px-3 py-1.5 text-xs font-semibold text-zinc-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300">
                             View

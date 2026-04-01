@@ -63,7 +63,7 @@ describe("newClaimSubmitSchema", () => {
     }
   });
 
-  test("accepts null GST number when GST is applicable (coerced to N/A)", () => {
+  test("requires GST number when GST is applicable", () => {
     const parsed = newClaimSubmitSchema.safeParse({
       ...validExpensePayload,
       expense: {
@@ -72,9 +72,10 @@ describe("newClaimSubmitSchema", () => {
       },
     });
 
-    expect(parsed.success).toBe(true);
-    if (parsed.success) {
-      expect(parsed.data.expense?.gstNumber).toBe("N/A");
+    expect(parsed.success).toBe(false);
+    if (!parsed.success) {
+      const issues = parsed.error.issues.map((issue) => issue.message);
+      expect(issues).toContain("GST number is required when GST is applicable.");
     }
   });
 
@@ -130,7 +131,7 @@ describe("newClaimSubmitSchema", () => {
       paymentModeId: "99999999-9999-4999-8999-999999999999",
       advance: {
         ...validExpensePayload.advance,
-        purpose: "Advance purpose",
+        purpose: "   ",
         remarks: null,
       },
     });
@@ -139,6 +140,7 @@ describe("newClaimSubmitSchema", () => {
     if (parsed.success) {
       expect(parsed.data.onBehalfEmail).toBe("N/A");
       expect(parsed.data.onBehalfEmployeeCode).toBe("N/A");
+      expect(parsed.data.advance?.purpose).toBe("N/A");
       expect(parsed.data.advance?.remarks).toBe("N/A");
     }
   });

@@ -1,18 +1,19 @@
-import dynamic from "next/dynamic";
+import { Inter, Plus_Jakarta_Sans } from "next/font/google";
 import { getClaimFormHydrationAction } from "@/modules/claims/actions";
 import { AppShellHeader } from "@/components/app-shell-header";
 import { BackButton } from "@/components/ui/back-button";
+import { NewClaimFormClient } from "@/modules/claims/ui/new-claim-form-client";
 import { ROUTES } from "@/core/config/route-registry";
-import { pageBodyFont, pageDisplayFont } from "@/lib/fonts";
 
-const NewClaimFormClient = dynamic(
-  () => import("@/modules/claims/ui/new-claim-form-client").then((mod) => mod.NewClaimFormClient),
-  {
-    loading: () => (
-      <div className="h-96 animate-pulse rounded-xl bg-zinc-200 dark:bg-gray-800/40" />
-    ),
-  },
-);
+const pageBodyFont = Inter({
+  subsets: ["latin"],
+  variable: "--font-dashboard-inter",
+});
+
+const pageDisplayFont = Plus_Jakarta_Sans({
+  subsets: ["latin"],
+  variable: "--font-dashboard-display",
+});
 
 export default async function NewClaimPage() {
   const hydrationResult = await getClaimFormHydrationAction();

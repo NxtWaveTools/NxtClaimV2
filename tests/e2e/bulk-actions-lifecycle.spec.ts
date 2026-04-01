@@ -396,24 +396,15 @@ async function bulkSelectCurrentResult(page: Page): Promise<void> {
   const master = page.getByTestId("bulk-master-checkbox").first();
   await expect(master).toBeVisible();
   await master.check();
-  await expect(page.getByText(/\b1 selected\b/i)).toBeVisible();
+  await expect(page.getByText(/1 claim\(s\) selected/i)).toBeVisible();
 }
 
 async function clickBulkApprove(page: Page): Promise<void> {
   await page.getByRole("button", { name: /^Bulk Approve$/i }).click();
 }
 
-async function clickBulkMarkPaid(page: Page, claimId: string): Promise<void> {
-  const row = page.locator("tbody tr", { has: page.getByRole("link", { name: claimId }) }).first();
-  await expect(row).toBeVisible({ timeout: 30000 });
-
-  const viewClaimButton = row.getByRole("button", { name: /^View Claim$/i }).first();
-  await expect(viewClaimButton).toBeVisible({ timeout: 10000 });
-  await viewClaimButton.click();
-
-  const markPaidButton = page.getByRole("button", { name: /^Mark as Paid$|^Paid$/i }).first();
-  await expect(markPaidButton).toBeVisible({ timeout: 15000 });
-  await markPaidButton.click();
+async function clickBulkMarkPaid(page: Page): Promise<void> {
+  await page.getByRole("button", { name: /^Bulk Mark Paid$/i }).click();
 }
 
 async function bulkReject(page: Page, reason: string, allowResubmission: boolean): Promise<void> {
@@ -478,7 +469,7 @@ test.describe("Bulk Actions Lifecycle Matrix", () => {
 
     await openApprovalsForClaim(financePage, claimId);
     await bulkSelectCurrentResult(financePage);
-    await clickBulkMarkPaid(financePage, claimId);
+    await clickBulkMarkPaid(financePage);
 
     await expect
       .poll(async () => (await getClaimState(claimId)).status, {
@@ -598,7 +589,7 @@ test.describe("Bulk Actions Lifecycle Matrix", () => {
     await bulkSelectCurrentResult(financePage);
 
     // Verify selection count banner appears
-    await expect(financePage.getByText(/\b1 selected\b/i)).toBeVisible();
+    await expect(financePage.getByText(/1 claim\(s\) selected/i)).toBeVisible();
 
     // Bulk approve
     await clickBulkApprove(financePage);
@@ -675,7 +666,7 @@ test.describe("Bulk Actions Lifecycle Matrix", () => {
 
     // Select and mark as paid
     await bulkSelectCurrentResult(financePage);
-    await clickBulkMarkPaid(financePage, claimId);
+    await clickBulkMarkPaid(financePage);
 
     // Verify DB status is now "Payment Done - Closed"
     await expect

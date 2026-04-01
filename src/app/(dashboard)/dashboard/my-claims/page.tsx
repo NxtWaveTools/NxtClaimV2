@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Inter, Plus_Jakarta_Sans } from "next/font/google";
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
 import { CirclePlus } from "lucide-react";
@@ -18,8 +19,7 @@ import { GetMyClaimsPaginatedService } from "@/core/domain/claims/GetMyClaimsPag
 import { GetPendingApprovalsService } from "@/core/domain/claims/GetPendingApprovalsService";
 import { logger } from "@/core/infra/logging/logger";
 import { formatDate, formatDateTime } from "@/lib/format";
-import { pageBodyFont, pageDisplayFont } from "@/lib/fonts";
-import { getCachedCurrentUser } from "@/modules/auth/server/get-current-user";
+import { SupabaseServerAuthRepository } from "@/modules/auth/repositories/supabase-server-auth.repository";
 import {
   approveClaimAction,
   approveFinanceAction,
@@ -42,6 +42,16 @@ import { ClaimsFilterBar } from "@/modules/claims/ui/claims-filter-bar";
 import { FinanceApprovalsBulkTable } from "@/modules/claims/ui/finance-approvals-bulk-table";
 import { MyClaimsPaginationControls } from "@/modules/claims/ui/my-claims-pagination-controls";
 import { ApprovalsAuditModeDialog } from "@/modules/claims/ui/approvals-quick-view-sheet";
+
+const pageBodyFont = Inter({
+  subsets: ["latin"],
+  variable: "--font-dashboard-inter",
+});
+
+const pageDisplayFont = Plus_Jakarta_Sans({
+  subsets: ["latin"],
+  variable: "--font-dashboard-display",
+});
 
 const PAGE_SIZE = 10;
 type SearchParamsValue = string | string[] | undefined;
@@ -999,25 +1009,30 @@ async function MyClaimsDashboardPageContent({
   searchParams,
   isAdminUser,
   isDeptViewer,
-  userId,
 }: {
   searchParams: Record<string, SearchParamsValue>;
   isAdminUser: boolean;
   isDeptViewer: boolean;
-  userId: string;
 }) {
+  const authRepository = new SupabaseServerAuthRepository();
   const claimRepository = new SupabaseClaimRepository();
   const pendingApprovalsService = new GetPendingApprovalsService({
     repository: claimRepository,
     logger,
   });
 
+  const currentUserResult = await authRepository.getCurrentUser();
+
+  if (currentUserResult.errorMessage || !currentUserResult.user?.id) {
+    redirect(ROUTES.login);
+  }
+
   const resolvedSearchParams = searchParams;
 
   const filters = buildClaimFilters(resolvedSearchParams);
 
   const viewerContextResult = await pendingApprovalsService.getViewerContext({
-    userId,
+    userId: currentUserResult.user.id,
   });
   const canViewApprovals = viewerContextResult.canViewApprovals;
   const requestedView = firstParamValue(resolvedSearchParams?.view);
@@ -1053,7 +1068,7 @@ async function MyClaimsDashboardPageContent({
 
       <Suspense key={JSON.stringify(resolvedSearchParams)} fallback={<TableSkeleton />}>
         <ClaimsCommandCenterTable
-          userId={userId}
+          userId={currentUserResult.user.id}
           view={activeView}
           approvalScope={viewerContextResult.activeScope}
           searchParams={resolvedSearchParams}
@@ -1069,18 +1084,16 @@ export default async function MyClaimsDashboardPage({
 }: {
   searchParams: Promise<Record<string, SearchParamsValue>>;
 }) {
+  const authRepository = new SupabaseServerAuthRepository();
+
   const [resolvedSearchParams, isAdminUser, isDeptViewer, currentUserResult] = await Promise.all([
     searchParams,
     isAdmin(),
     isDepartmentViewer(),
-    getCachedCurrentUser(),
+    authRepository.getCurrentUser(),
   ]);
 
   const currentEmail = currentUserResult.user?.email ?? null;
-
-  if (currentUserResult.errorMessage || !currentUserResult.user?.id) {
-    redirect(ROUTES.login);
-  }
 
   const requestedView = firstParamValue(resolvedSearchParams?.view);
   const activeView: ViewMode =
@@ -1197,7 +1210,6 @@ export default async function MyClaimsDashboardPage({
               searchParams={resolvedSearchParams}
               isAdminUser={isAdminUser}
               isDeptViewer={isDeptViewer}
-              userId={currentUserResult.user.id}
             />
           </Suspense>
         </main>
