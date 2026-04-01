@@ -204,6 +204,15 @@ async function bootstrapRoleStorage(
     const page = await context.newPage();
     await page.goto("/dashboard", { waitUntil: "domcontentloaded" });
 
+    if (/\/auth\/login/i.test(page.url())) {
+      throw new Error(`Auth bootstrap landed on login for ${role} (${email}).`);
+    }
+
+    await page.getByRole("button", { name: /sign out/i }).waitFor({
+      state: "visible",
+      timeout: 15000,
+    });
+
     await context.storageState({ path: getAuthStatePathByRole(role) });
     registerAuthStateEmail(email, role);
 

@@ -6,7 +6,8 @@ const mockSubmitClaimAction = jest.fn();
 const mockParseReceiptAction = jest.fn();
 const mockPush = jest.fn();
 const mockToastError = jest.fn();
-const mockToastPromise = jest.fn();
+const mockToastSuccess = jest.fn();
+const mockToastWarning = jest.fn();
 
 jest.mock("next/navigation", () => ({
   useRouter: () => ({
@@ -17,7 +18,8 @@ jest.mock("next/navigation", () => ({
 jest.mock("sonner", () => ({
   toast: {
     error: (...args: unknown[]) => mockToastError(...args),
-    promise: (...args: unknown[]) => mockToastPromise(...args),
+    success: (...args: unknown[]) => mockToastSuccess(...args),
+    warning: (...args: unknown[]) => mockToastWarning(...args),
   },
 }));
 
@@ -81,8 +83,7 @@ const options = {
 async function fillRequiredExpenseFields(user: ReturnType<typeof userEvent.setup>): Promise<void> {
   await user.type(screen.getByLabelText(/Employee ID/i), "EMP-100");
   await user.type(screen.getByLabelText(/Bill No/i), "BILL-100");
-  await user.type(screen.getByLabelText(/Transaction ID/i), "TXN-100");
-  await user.type(screen.getByLabelText(/Purpose \(Optional\)/i), "Client visit");
+  await user.type(screen.getByLabelText(/Purpose/i), "Client visit");
   await user.clear(screen.getByLabelText(/Basic Amount/i));
   await user.type(screen.getByLabelText(/Basic Amount/i), "100");
   await user.type(screen.getByLabelText(/Transaction Date/i), "2026-03-14");
@@ -95,7 +96,6 @@ async function fillRequiredExpenseFields(user: ReturnType<typeof userEvent.setup
 describe("NewClaimFormClient", () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    mockToastPromise.mockImplementation(async (promise: Promise<unknown>) => promise);
     mockSubmitClaimAction.mockResolvedValue({ ok: true, claimId: "claim-1" });
     mockParseReceiptAction.mockResolvedValue({
       ok: false,
@@ -167,8 +167,8 @@ describe("NewClaimFormClient", () => {
     await user.click(screen.getByRole("button", { name: /submit claim/i }));
 
     await waitFor(() => {
-      expect(mockToastPromise).toHaveBeenCalled();
-      expect(mockPush).toHaveBeenCalledWith("/dashboard/my-claims");
+      expect(mockToastSuccess).toHaveBeenCalledWith("Claim submitted successfully!");
+      expect(mockPush).toHaveBeenCalledWith("/dashboard/my-claims", { scroll: false });
     });
   });
 
@@ -181,7 +181,7 @@ describe("NewClaimFormClient", () => {
     await user.click(screen.getByRole("button", { name: /submit claim/i }));
 
     await waitFor(() => {
-      expect(mockToastPromise).toHaveBeenCalled();
+      expect(mockToastError).toHaveBeenCalledWith("Failed to submit claim.");
       expect(mockPush).not.toHaveBeenCalled();
     });
   });

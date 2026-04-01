@@ -38,6 +38,7 @@ loadEnvConfig(process.cwd());
 const RECEIPT_PATH = path.resolve(process.cwd(), "tests/fixtures/dummy-receipt.pdf");
 const INVALID_FILE_PATH = path.resolve(process.cwd(), "tests/fixtures/invalid-receipt.txt");
 const RUN_TAG = process.env.E2E_RUN_TAG ?? `VAL-${Date.now()}`;
+const DEFAULT_PASSWORD = process.env.E2E_DEFAULT_PASSWORD ?? "password123";
 
 // ---------------------------------------------------------------------------
 // Runtime DB helpers
@@ -119,20 +120,67 @@ async function resolveFormOptions(): Promise<FormOptions> {
 // Page-object helpers
 // ---------------------------------------------------------------------------
 
+async function ensureAuthenticated(page: Page): Promise<void> {
+  const submitterEmail = process.env.E2E_SUBMITTER_EMAIL ?? "user@nxtwave.co.in";
+  await page.goto("/dashboard", { waitUntil: "domcontentloaded" });
+
+  const signOutButton = page.getByRole("button", { name: /sign out/i });
+  const hasSession = await signOutButton.isVisible({ timeout: 3000 }).catch(() => false);
+  if (hasSession) {
+    return;
+  }
+
+  const loginResponse = await page.request.post("/api/auth/email-login", {
+    data: { email: submitterEmail, password: DEFAULT_PASSWORD },
+  });
+
+  if (!loginResponse.ok()) {
+    throw new Error(`Email login failed for ${submitterEmail}: HTTP ${loginResponse.status()}`);
+  }
+
+  const loginPayload = (await loginResponse.json()) as {
+    data?: { session?: { accessToken?: string; refreshToken?: string } };
+  };
+
+  const accessToken = loginPayload.data?.session?.accessToken;
+  const refreshToken = loginPayload.data?.session?.refreshToken;
+  if (!accessToken || !refreshToken) {
+    throw new Error(`Missing auth session tokens for ${submitterEmail}.`);
+  }
+
+  const sessionResponse = await page.request.post("/api/auth/session", {
+    data: { accessToken, refreshToken },
+  });
+
+  if (!sessionResponse.ok()) {
+    throw new Error(
+      `Session bootstrap failed for ${submitterEmail}: HTTP ${sessionResponse.status()}`,
+    );
+  }
+
+  await page.goto("/dashboard", { waitUntil: "domcontentloaded" });
+  await expect(page).not.toHaveURL(/\/auth\/login/i);
+  await expect(signOutButton).toBeVisible({ timeout: 15000 });
+}
+
 async function openClaimForm(page: Page): Promise<void> {
+  await ensureAuthenticated(page);
   await page.goto("/claims/new", { waitUntil: "domcontentloaded" });
+
+  const hydrationBanner = page.getByText(/unable to load claim form data/i);
+  if ((await hydrationBanner.count()) > 0) {
+    await ensureAuthenticated(page);
+    await page.goto("/claims/new", { waitUntil: "domcontentloaded" });
+  }
 
   // Confirm the form hydrated successfully — no server-error banner present
   await expect(page.getByText(/unable to load claim form data/i)).toHaveCount(0);
   await expect(page.getByRole("button", { name: /submit claim/i })).toBeVisible({
     timeout: 15_000,
   });
-
-  // Wait for React client-side hydration to complete.
-  // The hodEmail hidden input is populated by useEffect only after the component
-  // has fully hydrated. Interacting with selects before this point causes React
-  // hydration to reset them to their server-rendered default values.
-  await expect(page.locator('input[name="hodEmail"]')).not.toHaveValue("", { timeout: 15_000 });
+  await expect(page.getByRole("combobox", { name: /payment mode/i })).toBeVisible({
+    timeout: 15_000,
+  });
 }
 
 /**
