@@ -1,33 +1,22 @@
 import Link from "next/link";
-import { Inter, Plus_Jakarta_Sans } from "next/font/google";
 import { redirect } from "next/navigation";
 import { CalendarDays, CirclePlus, FileText, LayoutDashboard, Settings } from "lucide-react";
 import { ROUTES } from "@/core/config/route-registry";
 import { AppShellHeader } from "@/components/app-shell-header";
 import { logger } from "@/core/infra/logging/logger";
 import { GetWalletSummaryService } from "@/core/domain/dashboard/GetWalletSummaryService";
-import { SupabaseServerAuthRepository } from "@/modules/auth/repositories/supabase-server-auth.repository";
 import { SupabaseDashboardRepository } from "@/modules/dashboard/repositories/SupabaseDashboardRepository";
 import { WalletSummary } from "@/modules/dashboard/ui/wallet-summary";
 import { isAdmin } from "@/modules/admin/server/is-admin";
+import { getCachedCurrentUser } from "@/modules/auth/server/get-current-user";
+import { pageBodyFont, pageDisplayFont } from "@/lib/fonts";
 
 export const dynamic = "force-dynamic";
 
-const authRepository = new SupabaseServerAuthRepository();
 const dashboardRepository = new SupabaseDashboardRepository();
 const getWalletSummaryService = new GetWalletSummaryService({
   repository: dashboardRepository,
   logger,
-});
-
-const dashboardBodyFont = Inter({
-  subsets: ["latin"],
-  variable: "--font-dashboard-inter",
-});
-
-const dashboardDisplayFont = Plus_Jakarta_Sans({
-  subsets: ["latin"],
-  variable: "--font-dashboard-display",
 });
 
 const indiaDateFormatter = new Intl.DateTimeFormat("en-IN", {
@@ -45,10 +34,7 @@ const indiaHourFormatter = new Intl.DateTimeFormat("en-IN", {
 });
 
 export default async function DashboardPage() {
-  const [currentUserResult, isAdminUser] = await Promise.all([
-    authRepository.getCurrentUser(),
-    isAdmin(),
-  ]);
+  const [currentUserResult, isAdminUser] = await Promise.all([getCachedCurrentUser(), isAdmin()]);
   if (currentUserResult.errorMessage || !currentUserResult.user?.id) {
     redirect(ROUTES.login);
   }
@@ -94,7 +80,7 @@ export default async function DashboardPage() {
 
   return (
     <div
-      className={`${dashboardBodyFont.variable} ${dashboardDisplayFont.variable} dashboard-font-body nxt-page-bg relative isolate min-h-screen`}
+      className={`${pageBodyFont.variable} ${pageDisplayFont.variable} dashboard-font-body nxt-page-bg relative isolate min-h-screen`}
     >
       <div className="pointer-events-none absolute inset-0 overflow-hidden">
         <div className="absolute inset-0 bg-linear-to-b from-white/15 via-transparent to-transparent dark:from-white/0 dark:via-transparent dark:to-transparent" />

@@ -18,7 +18,7 @@ describe("WalletSummary", () => {
 
     expect(screen.getByText("-₹150.00")).toBeInTheDocument();
     expect(
-      screen.getByText(/Company Owed = Petty Cash Spent - Petty Cash Received/i),
+      screen.getByText(/Company owed = petty cash spent minus petty cash received/i),
     ).toBeInTheDocument();
   });
 });
