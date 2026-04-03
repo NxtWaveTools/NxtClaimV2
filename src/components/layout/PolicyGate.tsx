@@ -172,7 +172,10 @@ export function PolicyGate({ initialState, children }: PolicyGateProps) {
                     type="checkbox"
                     checked={hasConfirmedAcceptance}
                     onChange={(event) => {
-                      setHasConfirmedAcceptance(event.currentTarget.checked);
+                      setConfirmationState({
+                        policyId,
+                        checked: event.currentTarget.checked,
+                      });
                     }}
                     className="mt-0.5 h-4 w-4 rounded border-zinc-300 text-indigo-600 focus:ring-indigo-500 dark:border-zinc-700"
                   />
