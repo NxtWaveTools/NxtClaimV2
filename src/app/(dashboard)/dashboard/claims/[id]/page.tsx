@@ -501,6 +501,7 @@ async function ClaimDetailCore({ params }: { params: Promise<{ id: string }> }) 
   const canViewAsFinance = isFinanceActor && claim.status !== DB_CLAIM_STATUSES[0];
   const canView =
     currentUserId === claim.submittedBy ||
+    currentUserId === claim.onBehalfOfId ||
     isAssignedL1Approver ||
     isAssignedL2Approver ||
     canViewAsFinance ||
