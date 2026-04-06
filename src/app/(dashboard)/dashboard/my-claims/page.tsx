@@ -43,6 +43,7 @@ import {
 } from "@/modules/claims/ui/claim-status-badge";
 import { ClaimsFilterBar } from "@/modules/claims/ui/claims-filter-bar";
 import { FinanceApprovalsBulkTable } from "@/modules/claims/ui/finance-approvals-bulk-table";
+import { MyClaimsOffsetPaginationControls } from "@/modules/claims/ui/my-claims-offset-pagination-controls";
 import { MyClaimsPaginationControls } from "@/modules/claims/ui/my-claims-pagination-controls";
 import { ApprovalsAuditModeDialog } from "@/modules/claims/ui/approvals-quick-view-sheet";
 
@@ -488,6 +489,15 @@ async function ClaimsCommandCenterTable({
 
     const rows = approvalsResult.data;
     const claimIds = rows.map((claim) => claim.id);
+    const approvalCurrentPage = cursor
+      ? Math.max(1, Number(firstParamValue(searchParams?.page)) || 1)
+      : 1;
+    const approvalPageStart = rows.length > 0 ? (approvalCurrentPage - 1) * PAGE_SIZE + 1 : 0;
+    const approvalPageEnd =
+      rows.length > 0
+        ? Math.min((approvalCurrentPage - 1) * PAGE_SIZE + rows.length, approvalsResult.totalCount)
+        : 0;
+    const approvalsSummaryText = `Showing ${approvalPageStart} to ${approvalPageEnd} of ${approvalsResult.totalCount} claims`;
 
     if (approvalScope === "finance" || approvalScope === "l1") {
       const [evidenceSignedUrlByClaimId, auditLogsByClaimId] = await Promise.all([
@@ -516,6 +526,18 @@ async function ClaimsCommandCenterTable({
             </>
           ) : (
             <>
+              <MyClaimsPaginationControls
+                hasNextPage={approvalsResult.hasNextPage}
+                hasPreviousPage={Boolean(previousCursorToken)}
+                currentCursor={cursor}
+                nextCursor={approvalsResult.nextCursor}
+                previousCursor={previousCursorToken}
+                currentPage={approvalCurrentPage}
+                summaryText={approvalsSummaryText}
+                position="top"
+                searchParams={searchParams}
+              />
+
               <Suspense key={JSON.stringify(searchParams ?? {})} fallback={<TableSkeleton />}>
                 <FinanceApprovalsBulkTable
                   rows={rows.map((claim) => ({
@@ -558,15 +580,6 @@ async function ClaimsCommandCenterTable({
                   auditLogsByClaimId={auditLogsByClaimId}
                 />
               </Suspense>
-
-              <MyClaimsPaginationControls
-                hasNextPage={approvalsResult.hasNextPage}
-                hasPreviousPage={Boolean(previousCursorToken)}
-                currentCursor={cursor}
-                nextCursor={approvalsResult.nextCursor}
-                previousCursor={previousCursorToken}
-                searchParams={searchParams}
-              />
             </>
           )}
         </section>
@@ -610,6 +623,18 @@ async function ClaimsCommandCenterTable({
           </div>
         ) : (
           <>
+            <MyClaimsPaginationControls
+              hasNextPage={approvalsResult.hasNextPage}
+              hasPreviousPage={Boolean(previousCursorToken)}
+              currentCursor={cursor}
+              nextCursor={approvalsResult.nextCursor}
+              previousCursor={previousCursorToken}
+              currentPage={approvalCurrentPage}
+              summaryText={approvalsSummaryText}
+              position="top"
+              searchParams={searchParams}
+            />
+
             <div className="nxt-scroll w-full overflow-x-auto">
               <table className="min-w-345 divide-y divide-zinc-200/80 text-left text-sm dark:divide-zinc-800">
                 <TableHeader showActions />
@@ -795,24 +820,17 @@ async function ClaimsCommandCenterTable({
                 </tbody>
               </table>
             </div>
-
-            <MyClaimsPaginationControls
-              hasNextPage={approvalsResult.hasNextPage}
-              hasPreviousPage={Boolean(previousCursorToken)}
-              currentCursor={cursor}
-              nextCursor={approvalsResult.nextCursor}
-              previousCursor={previousCursorToken}
-              searchParams={searchParams}
-            />
           </>
         )}
       </section>
     );
   }
 
+  const currentPage = Math.max(1, Number(firstParamValue(searchParams?.page)) || 1);
+
   const claimsResult = await claimsService.execute({
     userId,
-    cursor,
+    page: currentPage,
     limit: PAGE_SIZE,
     filters,
   });
@@ -852,7 +870,7 @@ async function ClaimsCommandCenterTable({
             Unable to load claims. {claimsResult.errorMessage}
           </p>
         </div>
-      ) : rows.length === 0 ? (
+      ) : claimsResult.totalCount === 0 ? (
         <div className="grid place-items-center px-4 py-14 text-center">
           <p className="text-sm font-medium text-zinc-700 dark:text-zinc-300">No claims found</p>
           <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-500">
@@ -861,6 +879,14 @@ async function ClaimsCommandCenterTable({
         </div>
       ) : (
         <>
+          <MyClaimsOffsetPaginationControls
+            totalCount={claimsResult.totalCount}
+            page={currentPage}
+            limit={PAGE_SIZE}
+            position="top"
+            searchParams={searchParams}
+          />
+
           <div className="nxt-scroll overflow-x-auto">
             <table className="min-w-325 divide-y divide-zinc-200/80 text-left text-sm dark:divide-zinc-800">
               <TableHeader showActions />
@@ -968,15 +994,6 @@ async function ClaimsCommandCenterTable({
               </tbody>
             </table>
           </div>
-
-          <MyClaimsPaginationControls
-            hasNextPage={claimsResult.hasNextPage}
-            hasPreviousPage={Boolean(previousCursorToken)}
-            currentCursor={cursor}
-            nextCursor={claimsResult.nextCursor}
-            previousCursor={previousCursorToken}
-            searchParams={searchParams}
-          />
         </>
       )}
     </section>

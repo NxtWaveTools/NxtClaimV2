@@ -227,6 +227,7 @@ export function ClaimsFilterBar({
 
     nextParams.delete("cursor");
     nextParams.delete("prevCursor");
+    nextParams.delete("page");
     startTransition(() => {
       updateUrlWithMutation(nextParams, pathname, router);
     });
@@ -261,6 +262,7 @@ export function ClaimsFilterBar({
 
     nextParams.delete("cursor");
     nextParams.delete("prevCursor");
+    nextParams.delete("page");
     startTransition(() => {
       updateUrlWithMutation(nextParams, pathname, router);
     });
@@ -282,6 +284,7 @@ export function ClaimsFilterBar({
 
     nextParams.delete("cursor");
     nextParams.delete("prevCursor");
+    nextParams.delete("page");
     startTransition(() => {
       updateUrlWithMutation(nextParams, pathname, router);
     });
@@ -298,6 +301,7 @@ export function ClaimsFilterBar({
       const params = new URLSearchParams(searchParams.toString());
       params.delete("cursor");
       params.delete("prevCursor");
+      params.delete("page");
       params.set("scope", exportScope!);
 
       const accessToken = await getAccessTokenAction();
@@ -397,6 +401,7 @@ export function ClaimsFilterBar({
               nextParams.set("filters", isFiltersExpanded ? "closed" : "open");
               nextParams.delete("cursor");
               nextParams.delete("prevCursor");
+              nextParams.delete("page");
               startTransition(() => {
                 updateUrlWithMutation(nextParams, pathname, router);
               });

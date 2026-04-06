@@ -6,6 +6,10 @@ import { serverEnv } from "@/core/config/server-env";
 
 const MAX_FILE_SIZE_BYTES = 25 * 1024 * 1024;
 const CONFIDENCE_THRESHOLD = 80;
+const GENERIC_PARSE_FALLBACK_MESSAGE =
+  "AI could not read the text formatting in this document. Please fill the details manually.";
+const GEMINI_QUOTA_FALLBACK_PREFIX =
+  "AI auto-parse is temporarily unavailable due to usage limits.";
 const ALLOWED_UPLOAD_MIME_TYPES = new Set([
   "application/pdf",
   "image/jpeg",
@@ -135,6 +139,94 @@ function clampConfidence(value: number): number {
   }
 
   return Math.max(0, Math.min(100, Math.round(value)));
+}
+
+type GeminiErrorShape = {
+  status?: number;
+  statusText?: string;
+  message?: string;
+  errorDetails?: unknown;
+};
+
+function asGeminiErrorShape(error: unknown): GeminiErrorShape {
+  if (typeof error !== "object" || error === null) {
+    return {};
+  }
+
+  return error as GeminiErrorShape;
+}
+
+function parseRetrySeconds(input: string): number | null {
+  const value = input.trim();
+  const durationMatch = value.match(/^(\d+(?:\.\d+)?)s$/i);
+
+  if (durationMatch && durationMatch[1]) {
+    const parsed = Number.parseFloat(durationMatch[1]);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  }
+
+  const sentenceMatch = value.match(/retry\s+in\s+(\d+(?:\.\d+)?)\s*s?/i);
+  if (sentenceMatch && sentenceMatch[1]) {
+    const parsed = Number.parseFloat(sentenceMatch[1]);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  }
+
+  return null;
+}
+
+function extractRetryDelaySeconds(error: unknown): number | null {
+  const geminiError = asGeminiErrorShape(error);
+  const details = Array.isArray(geminiError.errorDetails) ? geminiError.errorDetails : [];
+
+  for (const detail of details) {
+    if (typeof detail !== "object" || detail === null) {
+      continue;
+    }
+
+    const retryDelay = (detail as { retryDelay?: unknown }).retryDelay;
+    if (typeof retryDelay !== "string") {
+      continue;
+    }
+
+    const parsed = parseRetrySeconds(retryDelay);
+    if (parsed !== null) {
+      return parsed;
+    }
+  }
+
+  if (typeof geminiError.message === "string") {
+    return parseRetrySeconds(geminiError.message);
+  }
+
+  return null;
+}
+
+function isGeminiQuotaError(error: unknown): boolean {
+  const geminiError = asGeminiErrorShape(error);
+
+  if (geminiError.status === 429) {
+    return true;
+  }
+
+  const lowerStatusText = (geminiError.statusText ?? "").toLowerCase();
+  const lowerMessage = (geminiError.message ?? "").toLowerCase();
+
+  return (
+    lowerStatusText.includes("too many requests") ||
+    lowerMessage.includes("too many requests") ||
+    lowerMessage.includes("quota exceeded") ||
+    lowerMessage.includes("rate limit")
+  );
+}
+
+function getQuotaExceededMessage(error: unknown): string {
+  const retryDelaySeconds = extractRetryDelaySeconds(error);
+  const retryHint =
+    retryDelaySeconds !== null
+      ? ` Please retry in about ${Math.ceil(retryDelaySeconds)} seconds.`
+      : " Please try again shortly.";
+
+  return `${GEMINI_QUOTA_FALLBACK_PREFIX}${retryHint} You can still fill the details manually.`;
 }
 
 function normalizeGeminiResult(raw: z.infer<typeof geminiParseResultSchema>): ParsedReceiptResult {
@@ -268,8 +360,7 @@ export async function parseReceiptAction(input: FormData): Promise<ParseReceiptA
         ok: false,
         data: null,
         autoFillAllowed: false,
-        message:
-          "AI could not read the text formatting in this document. Please fill the details manually.",
+        message: GENERIC_PARSE_FALLBACK_MESSAGE,
       };
     }
 
@@ -306,13 +397,26 @@ export async function parseReceiptAction(input: FormData): Promise<ParseReceiptA
       message,
     };
   } catch (error) {
+    if (isGeminiQuotaError(error)) {
+      const retryDelaySeconds = extractRetryDelaySeconds(error);
+      console.warn("\n=== ⚠️ GEMINI RATE LIMITED ===\n", {
+        retryDelaySeconds,
+      });
+
+      return {
+        ok: false,
+        data: null,
+        autoFillAllowed: false,
+        message: getQuotaExceededMessage(error),
+      };
+    }
+
     console.error("\n=== ❌ FATAL SERVER CRASH ===\n", error);
     return {
       ok: false,
       data: null,
       autoFillAllowed: false,
-      message:
-        "AI could not read the text formatting in this document. Please fill the details manually.",
+      message: GENERIC_PARSE_FALLBACK_MESSAGE,
     };
   }
 }
