@@ -206,7 +206,7 @@ export class SubmitClaimService {
       const isBeneficiaryDepartmentApprover2 = effectiveUserId === departmentApprover2Id;
 
       // Beneficiary-centric routing:
-      // - Proxy for department approver_1 routes to approver_1 for self-approval review.
+      // - Proxy for department approver_1 routes to approver_2 to prevent self-approval.
       // - Proxy for department approver_2 routes to approver_2 (senior approver path).
       // - Self submission by any HOD/approver_1 leapfrogs to approver_2.
       // - All other submissions route to approver_1.
@@ -214,7 +214,7 @@ export class SubmitClaimService {
 
       const assignedL1ApproverId = isProxySubmission
         ? isBeneficiaryDepartmentApprover1
-          ? effectiveUserId
+          ? departmentApprover2Id
           : isBeneficiaryDepartmentApprover2
             ? departmentApprover2Id
             : departmentApprover1Id

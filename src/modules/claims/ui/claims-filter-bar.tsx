@@ -667,7 +667,9 @@ export function ClaimsFilterBar({
               });
             }}
             className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
-            aria-expanded={isFiltersExpanded ? "true" : "false"}
+            {...(isFiltersExpanded
+              ? ({ "aria-expanded": "true" } as const)
+              : ({ "aria-expanded": "false" } as const))}
             aria-controls="claims-filter-panel"
           >
             <svg

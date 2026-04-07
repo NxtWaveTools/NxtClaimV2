@@ -92,6 +92,8 @@ function createClaimRepository(overrides?: Partial<ClaimRepository>): ClaimRepos
     createClaimAuditLog: jest.fn(async () => ({ errorMessage: null })),
     getClaimAuditLogs: jest.fn(async () => ({ data: [], errorMessage: null })),
     getClaimForFinanceEdit: jest.fn(async () => ({ data: null, errorMessage: null })),
+    getClaimForSubmitterDelete: jest.fn(async () => ({ data: null, errorMessage: null })),
+    softDeleteClaimBySubmitter: jest.fn(async () => ({ success: true, errorMessage: null })),
     updateClaimDetailsByFinance: jest.fn(async () => ({ errorMessage: null })),
     getMyClaims: jest.fn(async () => ({ data: [], errorMessage: null })),
     getMyClaimsPaginated: jest.fn(async () => ({

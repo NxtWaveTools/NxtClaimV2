@@ -671,10 +671,14 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
 
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div className="grid gap-1">
-                <label className="text-xs font-medium text-zinc-600 dark:text-zinc-400">
+                <label
+                  htmlFor="employeeNameReadOnly"
+                  className="text-xs font-medium text-zinc-600 dark:text-zinc-400"
+                >
                   Employee Name
                 </label>
                 <input
+                  id="employeeNameReadOnly"
                   value={currentUser.name}
                   readOnly
                   className="h-9 rounded-lg border border-zinc-200 bg-zinc-50 px-3 text-sm text-zinc-700 dark:border-zinc-700 dark:bg-zinc-800/50 dark:text-zinc-300"
@@ -682,10 +686,14 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
               </div>
 
               <div className="grid gap-1">
-                <label className="text-xs font-medium text-zinc-600 dark:text-zinc-400">
+                <label
+                  htmlFor="employeeEmailReadOnly"
+                  className="text-xs font-medium text-zinc-600 dark:text-zinc-400"
+                >
                   Employee Email
                 </label>
                 <input
+                  id="employeeEmailReadOnly"
                   value={currentUser.email}
                   readOnly
                   className="h-9 rounded-lg border border-zinc-200 bg-zinc-50 px-3 text-sm text-zinc-700 dark:border-zinc-700 dark:bg-zinc-800/50 dark:text-zinc-300"
@@ -842,10 +850,14 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
               </div>
 
               <div className="grid gap-1">
-                <label className="text-xs font-medium text-zinc-600 dark:text-zinc-400">
+                <label
+                  htmlFor="l1ApproverNameReadOnly"
+                  className="text-xs font-medium text-zinc-600 dark:text-zinc-400"
+                >
                   {l1ApproverLabel}
                 </label>
                 <input
+                  id="l1ApproverNameReadOnly"
                   value={
                     resolvedL1Approver?.fullName ?? resolvedL1Approver?.email ?? "Not available"
                   }
@@ -858,10 +870,14 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
               </div>
 
               <div className="grid gap-1">
-                <label className="text-xs font-medium text-zinc-600 dark:text-zinc-400">
+                <label
+                  htmlFor="l1ApproverEmailReadOnly"
+                  className="text-xs font-medium text-zinc-600 dark:text-zinc-400"
+                >
                   {l1ApproverEmailLabel}
                 </label>
                 <input
+                  id="l1ApproverEmailReadOnly"
                   value={resolvedL1Approver?.email ?? "Not available"}
                   readOnly
                   className="h-9 rounded-lg border border-zinc-200 bg-zinc-50 px-3 text-sm text-zinc-700 dark:border-zinc-700 dark:bg-zinc-800/50 dark:text-zinc-300"
