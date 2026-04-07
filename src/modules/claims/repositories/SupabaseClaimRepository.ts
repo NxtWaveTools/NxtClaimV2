@@ -1,6 +1,8 @@
 import { getServiceRoleSupabaseClient } from "@/core/infra/supabase/server-client";
 import {
   DB_CLAIM_STATUSES,
+  DB_REJECTED_RESUBMISSION_ALLOWED_STATUS,
+  DB_REJECTED_STATUSES,
   type DbClaimStatus,
   mapCanonicalStatusToDbStatuses,
 } from "@/core/constants/statuses";
@@ -84,6 +86,7 @@ type EnterpriseClaimsDashboardRow = {
   created_at: string;
   submitted_by?: string;
   on_behalf_of_id?: string | null;
+  on_behalf_email?: string | null;
   assigned_l1_approver_id?: string;
   assigned_l2_approver_id?: string | null;
   department_id?: string;
@@ -91,6 +94,13 @@ type EnterpriseClaimsDashboardRow = {
   submitter_email?: string | null;
   hod_email?: string | null;
   finance_email?: string | null;
+  // Enriched columns added by 20260407000100 migration
+  submitter_label?: string | null;
+  category_name?: string | null;
+  purpose?: string | null;
+  receipt_file_path?: string | null;
+  bank_statement_file_path?: string | null;
+  supporting_document_path?: string | null;
 };
 
 type ClaimAuditLogActorRow = {
@@ -391,7 +401,11 @@ function toNumber(value: number | string | null | undefined): number | null {
   return null;
 }
 
-const FINANCE_CLOSED_STATUSES: DbClaimStatus[] = [DB_CLAIM_STATUSES[2], DB_CLAIM_STATUSES[3]];
+const FINANCE_CLOSED_STATUSES: DbClaimStatus[] = [
+  DB_CLAIM_STATUSES[2],
+  DB_CLAIM_STATUSES[3],
+  ...DB_REJECTED_STATUSES,
+];
 
 const PAYMENT_DONE_CLOSED_STATUS = DB_CLAIM_STATUSES[3];
 const PAYMENT_MODE_REIMBURSEMENT = "reimbursement";
@@ -1246,12 +1260,13 @@ export class SupabaseClaimRepository implements ClaimRepository {
     const financeNonRejectedStatusesFilter = toPostgrestInList(
       FINANCE_NON_REJECTED_VISIBLE_STATUSES,
     );
+    const financeRejectedStatusesFilter = toPostgrestInList([...DB_REJECTED_STATUSES]);
 
     let query = client
       .from("vw_enterprise_claims_dashboard")
       .select("claim_id")
       .or(
-        `status.in.${financeNonRejectedStatusesFilter},and(status.eq.Rejected,assigned_l2_approver_id.not.is.null)`,
+        `status.in.${financeNonRejectedStatusesFilter},and(status.in.${financeRejectedStatusesFilter},assigned_l2_approver_id.not.is.null)`,
       )
       .order("created_at", { ascending: false })
       .order("claim_id", { ascending: false });
@@ -1360,9 +1375,10 @@ export class SupabaseClaimRepository implements ClaimRepository {
     allowResubmission: boolean;
   }): Promise<{ errorMessage: string | null }> {
     const client = getServiceRoleSupabaseClient();
+    const isRejectedStatus = DB_REJECTED_STATUSES.includes(input.status);
     const isL1TerminalStatus =
       input.status === DB_CLAIM_STATUSES[1] ||
-      (input.status === "Rejected" && input.assignedL2ApproverId === null);
+      (isRejectedStatus && input.assignedL2ApproverId === null);
 
     const { error } = await client
       .from("claims")
@@ -1380,7 +1396,7 @@ export class SupabaseClaimRepository implements ClaimRepository {
       return { errorMessage: error.message };
     }
 
-    if (input.status === DB_CLAIM_STATUSES[4] && input.allowResubmission) {
+    if (input.status === DB_REJECTED_RESUBMISSION_ALLOWED_STATUS && input.allowResubmission) {
       const [{ error: expenseDeactivateError }, { error: advanceDeactivateError }] =
         await Promise.all([
           client
@@ -1407,7 +1423,7 @@ export class SupabaseClaimRepository implements ClaimRepository {
     const auditActionType: ClaimAuditActionType | null =
       input.status === DB_CLAIM_STATUSES[1]
         ? "L1_APPROVED"
-        : input.status === DB_CLAIM_STATUSES[4]
+        : isRejectedStatus
           ? "L1_REJECTED"
           : null;
 
@@ -1510,9 +1526,10 @@ export class SupabaseClaimRepository implements ClaimRepository {
       return { errorMessage: null };
     }
 
+    const isRejectedStatus = DB_REJECTED_STATUSES.includes(input.status);
     const isFinanceTerminalStatus =
       input.status === DB_CLAIM_STATUSES[2] ||
-      (input.status === "Rejected" && input.assignedL2ApproverId !== null);
+      (isRejectedStatus && input.assignedL2ApproverId !== null);
 
     const { error } = await client
       .from("claims")
@@ -1530,7 +1547,7 @@ export class SupabaseClaimRepository implements ClaimRepository {
       return { errorMessage: error.message };
     }
 
-    if (input.status === DB_CLAIM_STATUSES[4] && input.allowResubmission) {
+    if (input.status === DB_REJECTED_RESUBMISSION_ALLOWED_STATUS && input.allowResubmission) {
       const [{ error: expenseDeactivateError }, { error: advanceDeactivateError }] =
         await Promise.all([
           client
@@ -1557,7 +1574,7 @@ export class SupabaseClaimRepository implements ClaimRepository {
     const auditActionType: ClaimAuditActionType | null =
       input.status === DB_CLAIM_STATUSES[2]
         ? "L2_APPROVED"
-        : input.status === DB_CLAIM_STATUSES[4]
+        : isRejectedStatus
           ? "L2_REJECTED"
           : null;
 
@@ -2570,7 +2587,7 @@ export class SupabaseClaimRepository implements ClaimRepository {
     let query = client
       .from("vw_enterprise_claims_dashboard")
       .select(
-        "claim_id, employee_name, employee_id, department_name, type_of_claim, amount, status, submitted_on, hod_action_date, finance_action_date, detail_type, submission_type, created_at, submitter_email, hod_email, finance_email",
+        "claim_id, employee_name, employee_id, department_name, type_of_claim, amount, status, submitted_on, hod_action_date, finance_action_date, detail_type, submission_type, on_behalf_email, created_at, submitter_email, hod_email, finance_email, submitter_label, category_name, purpose, receipt_file_path, bank_statement_file_path, supporting_document_path",
         { count: "exact" },
       )
       .or(buildMyClaimsOwnershipOrFilter(userId))
@@ -2611,9 +2628,16 @@ export class SupabaseClaimRepository implements ClaimRepository {
       financeActionDate: row.finance_action_date,
       detailType: row.detail_type,
       submissionType: row.submission_type,
+      onBehalfEmail: row.on_behalf_email ?? null,
       submitterEmail: row.submitter_email ?? null,
       hodEmail: row.hod_email ?? null,
       financeEmail: row.finance_email ?? null,
+      submitterLabel: row.submitter_label ?? null,
+      categoryName: row.category_name ?? null,
+      purpose: row.purpose ?? null,
+      expenseReceiptFilePath: row.receipt_file_path ?? null,
+      expenseBankStatementFilePath: row.bank_statement_file_path ?? null,
+      advanceSupportingDocumentPath: row.supporting_document_path ?? null,
     }));
 
     return {
@@ -2790,6 +2814,7 @@ export class SupabaseClaimRepository implements ClaimRepository {
     const financeNonRejectedStatusesFilter = toPostgrestInList(
       FINANCE_NON_REJECTED_VISIBLE_STATUSES,
     );
+    const financeRejectedStatusesFilter = toPostgrestInList([...DB_REJECTED_STATUSES]);
 
     const needsExpenseInnerJoin =
       filters?.locationId || filters?.productId || filters?.expenseCategoryId;
@@ -2805,7 +2830,7 @@ export class SupabaseClaimRepository implements ClaimRepository {
         { count: "exact" },
       )
       .or(
-        `status.in.${financeNonRejectedStatusesFilter},and(status.eq.Rejected,assigned_l2_approver_id.not.is.null)`,
+        `status.in.${financeNonRejectedStatusesFilter},and(status.in.${financeRejectedStatusesFilter},assigned_l2_approver_id.not.is.null)`,
       )
       .eq("is_active", true)
       .order("created_at", { ascending: false })
@@ -2913,9 +2938,10 @@ export class SupabaseClaimRepository implements ClaimRepository {
       const financeNonRejectedStatusesFilter = toPostgrestInList(
         FINANCE_NON_REJECTED_VISIBLE_STATUSES,
       );
+      const financeRejectedStatusesFilter = toPostgrestInList([...DB_REJECTED_STATUSES]);
 
       query = query.or(
-        `status.in.${financeNonRejectedStatusesFilter},and(status.eq.Rejected,assigned_l2_approver_id.not.is.null)`,
+        `status.in.${financeNonRejectedStatusesFilter},and(status.in.${financeRejectedStatusesFilter},assigned_l2_approver_id.not.is.null)`,
       );
     }
 
@@ -3011,9 +3037,10 @@ export class SupabaseClaimRepository implements ClaimRepository {
       const financeNonRejectedStatusesFilter = toPostgrestInList(
         FINANCE_NON_REJECTED_VISIBLE_STATUSES,
       );
+      const financeRejectedStatusesFilter = toPostgrestInList([...DB_REJECTED_STATUSES]);
 
       idsQuery = idsQuery.or(
-        `status.in.${financeNonRejectedStatusesFilter},and(status.eq.Rejected,assigned_l2_approver_id.not.is.null)`,
+        `status.in.${financeNonRejectedStatusesFilter},and(status.in.${financeRejectedStatusesFilter},assigned_l2_approver_id.not.is.null)`,
       );
     }
 

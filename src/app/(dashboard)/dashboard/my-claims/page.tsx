@@ -837,24 +837,21 @@ async function ClaimsCommandCenterTable({
 
   const rows = claimsResult.data;
   const claimIds = rows.map((claim) => claim.id);
-  const [submissionDetailResult, submissionAuditLogsByClaimId] = await Promise.all([
-    claimRepository.getClaimListDetails(claimIds),
+  // All claim detail fields (submitter, category, purpose, file paths) are now
+  // returned directly by getMyClaimsPaginated via the enriched view —
+  // no secondary getClaimListDetails fetch needed.
+  const [submissionAuditLogsByClaimId, submissionEvidenceSignedUrlByClaimId] = await Promise.all([
     resolveAuditLogsByClaimId(claimRepository, claimIds),
+    resolveApprovalEvidenceUrls(
+      claimRepository,
+      rows.map((claim) => ({
+        id: claim.id,
+        expenseReceiptFilePath: claim.expenseReceiptFilePath,
+        expenseBankStatementFilePath: claim.expenseBankStatementFilePath,
+        advanceSupportingDocumentPath: claim.advanceSupportingDocumentPath,
+      })),
+    ),
   ]);
-  const submissionDetailsByClaimId = submissionDetailResult.data;
-  const submissionEvidenceSignedUrlByClaimId = await resolveApprovalEvidenceUrls(
-    claimRepository,
-    claimIds.map((claimId) => {
-      const detail = submissionDetailsByClaimId[claimId];
-
-      return {
-        id: claimId,
-        expenseReceiptFilePath: detail?.expenseReceiptFilePath ?? null,
-        expenseBankStatementFilePath: detail?.expenseBankStatementFilePath ?? null,
-        advanceSupportingDocumentPath: detail?.advanceSupportingDocumentPath ?? null,
-      };
-    }),
-  );
 
   return (
     <section className="overflow-hidden rounded-[28px] border border-zinc-200/80 bg-white/92 shadow-[0_20px_60px_-20px_rgba(15,23,42,0.12)] backdrop-blur-sm transition-colors dark:border-zinc-800 dark:bg-zinc-900/92 dark:shadow-black/25">
@@ -892,7 +889,6 @@ async function ClaimsCommandCenterTable({
               <TableHeader showActions />
               <tbody className="divide-y divide-zinc-100/80 bg-white/50 text-xs text-zinc-700 dark:divide-zinc-800 dark:bg-zinc-900/50 dark:text-zinc-300">
                 {rows.map((claim) => {
-                  const detail = submissionDetailsByClaimId[claim.id];
                   const evidenceSignedUrls = submissionEvidenceSignedUrlByClaimId[claim.id] ?? {
                     expenseReceiptSignedUrl: null,
                     expenseBankStatementSignedUrl: null,
@@ -956,36 +952,27 @@ async function ClaimsCommandCenterTable({
                       </td>
                       <td className="whitespace-nowrap px-3 py-2 text-right">
                         <div className="flex items-center justify-end gap-2">
-                          {detail ? (
-                            <ApprovalsAuditModeDialog
-                              claimId={claim.id}
-                              detailType={detail.detailType}
-                              submitter={detail.submitter}
-                              amountLabel={claim.formattedTotalAmount}
-                              categoryName={detail.categoryName}
-                              purpose={detail.purpose}
-                              submissionType={detail.submissionType}
-                              onBehalfEmail={detail.onBehalfEmail}
-                              expenseReceiptFilePath={detail.expenseReceiptFilePath}
-                              expenseReceiptSignedUrl={evidenceSignedUrls.expenseReceiptSignedUrl}
-                              expenseBankStatementFilePath={detail.expenseBankStatementFilePath}
-                              expenseBankStatementSignedUrl={
-                                evidenceSignedUrls.expenseBankStatementSignedUrl
-                              }
-                              advanceSupportingDocumentPath={detail.advanceSupportingDocumentPath}
-                              advanceSupportingDocumentSignedUrl={
-                                evidenceSignedUrls.advanceSupportingDocumentSignedUrl
-                              }
-                              auditLogs={submissionAuditLogsByClaimId[claim.id] ?? []}
-                            />
-                          ) : (
-                            <Link
-                              href={ROUTES.claims.detail(claim.id)}
-                              className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-zinc-300 bg-white px-2.5 text-xs font-semibold text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
-                            >
-                              View
-                            </Link>
-                          )}
+                          <ApprovalsAuditModeDialog
+                            claimId={claim.id}
+                            detailType={claim.detailType}
+                            submitter={claim.submitterLabel ?? claim.employeeName}
+                            amountLabel={claim.formattedTotalAmount}
+                            categoryName={claim.categoryName ?? "Uncategorized"}
+                            purpose={claim.purpose}
+                            submissionType={claim.submissionType}
+                            onBehalfEmail={claim.onBehalfEmail}
+                            expenseReceiptFilePath={claim.expenseReceiptFilePath}
+                            expenseReceiptSignedUrl={evidenceSignedUrls.expenseReceiptSignedUrl}
+                            expenseBankStatementFilePath={claim.expenseBankStatementFilePath}
+                            expenseBankStatementSignedUrl={
+                              evidenceSignedUrls.expenseBankStatementSignedUrl
+                            }
+                            advanceSupportingDocumentPath={claim.advanceSupportingDocumentPath}
+                            advanceSupportingDocumentSignedUrl={
+                              evidenceSignedUrls.advanceSupportingDocumentSignedUrl
+                            }
+                            auditLogs={submissionAuditLogsByClaimId[claim.id] ?? []}
+                          />
                         </div>
                       </td>
                     </tr>

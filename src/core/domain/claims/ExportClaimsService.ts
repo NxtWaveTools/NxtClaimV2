@@ -4,7 +4,11 @@ import type {
   ClaimsExportFetchScope,
   GetMyClaimsFilters,
 } from "@/core/domain/claims/contracts";
-import { DB_CLAIM_STATUSES, type DbClaimStatus } from "@/core/constants/statuses";
+import {
+  DB_CLAIM_STATUSES,
+  DB_REJECTED_STATUSES,
+  type DbClaimStatus,
+} from "@/core/constants/statuses";
 
 type ExportClaimsRepository = {
   getApprovalViewerContext(userId: string): Promise<{
@@ -206,7 +210,8 @@ function deriveWorkflowStatuses(input: { status: DbClaimStatus; financeActionAt:
         financeStatus: "Approved",
         billStatus: "Paid",
       };
-    case DB_CLAIM_STATUSES[4]:
+    case DB_REJECTED_STATUSES[0]:
+    case DB_REJECTED_STATUSES[1]:
       return {
         hodStatus: input.financeActionAt ? "Approved" : "Rejected",
         financeStatus: input.financeActionAt ? "Rejected" : "N/A",

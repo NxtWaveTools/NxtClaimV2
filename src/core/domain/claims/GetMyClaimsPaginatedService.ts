@@ -20,9 +20,16 @@ type MyClaimsPaginatedRecord = {
   financeActionDate: string | null;
   detailType: ClaimDetailType;
   submissionType: ClaimSubmissionType;
+  onBehalfEmail: string | null;
   submitterEmail: string | null;
   hodEmail: string | null;
   financeEmail: string | null;
+  submitterLabel: string | null;
+  categoryName: string | null;
+  purpose: string | null;
+  expenseReceiptFilePath: string | null;
+  expenseBankStatementFilePath: string | null;
+  advanceSupportingDocumentPath: string | null;
   formattedTotalAmount: string;
   formattedSubmittedAt: string;
   formattedHodActionDate: string;
@@ -42,9 +49,16 @@ type RepositoryClaimRow = {
   financeActionDate: string | null;
   detailType: ClaimDetailType;
   submissionType: ClaimSubmissionType;
+  onBehalfEmail: string | null;
   submitterEmail: string | null;
   hodEmail: string | null;
   financeEmail: string | null;
+  submitterLabel: string | null;
+  categoryName: string | null;
+  purpose: string | null;
+  expenseReceiptFilePath: string | null;
+  expenseBankStatementFilePath: string | null;
+  advanceSupportingDocumentPath: string | null;
 };
 
 type PaginatedClaimsRepository = {

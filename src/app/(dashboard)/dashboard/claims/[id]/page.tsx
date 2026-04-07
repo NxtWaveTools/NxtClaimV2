@@ -7,7 +7,7 @@ import { ExternalLink } from "lucide-react";
 import { AppShellHeader } from "@/components/app-shell-header";
 import { BackButton } from "@/components/ui/back-button";
 import { ROUTES } from "@/core/config/route-registry";
-import { DB_CLAIM_STATUSES } from "@/core/constants/statuses";
+import { DB_CLAIM_STATUSES, DB_REJECTED_STATUSES } from "@/core/constants/statuses";
 import { getCachedCurrentUser } from "@/modules/auth/server/get-current-user";
 import {
   approveClaimAction,
@@ -698,7 +698,7 @@ async function ClaimDetailCore({ params }: { params: Promise<{ id: string }> }) 
         </div>
       </section>
 
-      {claim.status === DB_CLAIM_STATUSES[4] && claim.rejectionReason ? (
+      {DB_REJECTED_STATUSES.includes(claim.status) && claim.rejectionReason ? (
         <section className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 dark:border-rose-700/40 dark:bg-rose-900/10">
           <h2 className="text-xs font-semibold uppercase tracking-[0.12em] text-rose-700 dark:text-rose-300">
             Rejection Reason
