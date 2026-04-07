@@ -35,6 +35,8 @@ const baseExpenseInput = {
     expenseCategoryId: "55555555-5555-5555-5555-555555555555",
     productId: "77777777-7777-7777-7777-777777777777",
     locationId: "66666666-6666-6666-6666-666666666666",
+    locationType: null,
+    locationDetails: null,
     isGstApplicable: true,
     gstNumber: "GST-ADV-123",
     cgstAmount: 9,
