@@ -698,7 +698,7 @@ async function ClaimDetailCore({ params }: { params: Promise<{ id: string }> }) 
         </div>
       </section>
 
-      {DB_REJECTED_STATUSES.includes(claim.status) && claim.rejectionReason ? (
+      {DB_REJECTED_STATUSES.some((status) => status === claim.status) && claim.rejectionReason ? (
         <section className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 dark:border-rose-700/40 dark:bg-rose-900/10">
           <h2 className="text-xs font-semibold uppercase tracking-[0.12em] text-rose-700 dark:text-rose-300">
             Rejection Reason

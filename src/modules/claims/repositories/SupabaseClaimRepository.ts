@@ -1375,7 +1375,7 @@ export class SupabaseClaimRepository implements ClaimRepository {
     allowResubmission: boolean;
   }): Promise<{ errorMessage: string | null }> {
     const client = getServiceRoleSupabaseClient();
-    const isRejectedStatus = DB_REJECTED_STATUSES.includes(input.status);
+    const isRejectedStatus = DB_REJECTED_STATUSES.some((status) => status === input.status);
     const isL1TerminalStatus =
       input.status === DB_CLAIM_STATUSES[1] ||
       (isRejectedStatus && input.assignedL2ApproverId === null);
@@ -1526,7 +1526,7 @@ export class SupabaseClaimRepository implements ClaimRepository {
       return { errorMessage: null };
     }
 
-    const isRejectedStatus = DB_REJECTED_STATUSES.includes(input.status);
+    const isRejectedStatus = DB_REJECTED_STATUSES.some((status) => status === input.status);
     const isFinanceTerminalStatus =
       input.status === DB_CLAIM_STATUSES[2] ||
       (isRejectedStatus && input.assignedL2ApproverId !== null);
@@ -2568,9 +2568,16 @@ export class SupabaseClaimRepository implements ClaimRepository {
       financeActionDate: string | null;
       detailType: "expense" | "advance";
       submissionType: "Self" | "On Behalf";
+      onBehalfEmail: string | null;
       submitterEmail: string | null;
       hodEmail: string | null;
       financeEmail: string | null;
+      submitterLabel: string | null;
+      categoryName: string | null;
+      purpose: string | null;
+      expenseReceiptFilePath: string | null;
+      expenseBankStatementFilePath: string | null;
+      advanceSupportingDocumentPath: string | null;
     }>;
     totalCount: number;
     errorMessage: string | null;
