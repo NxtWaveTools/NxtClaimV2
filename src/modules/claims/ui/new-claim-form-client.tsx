@@ -103,6 +103,26 @@ function toOptional(value: string): string | undefined {
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
+function normalizeCategoryName(value: string | null | undefined): string {
+  return typeof value === "string" ? value.trim().toLowerCase() : "";
+}
+
+function resolveExpenseCategoryIdFromAi(
+  categoryName: string | null,
+  categories: ClaimFormOptions["expenseCategories"],
+): string {
+  const normalizedIncomingName = normalizeCategoryName(categoryName);
+  if (!normalizedIncomingName) {
+    return "";
+  }
+
+  const matchedCategory = categories.find(
+    (category) => normalizeCategoryName(category.name) === normalizedIncomingName,
+  );
+
+  return matchedCategory?.id ?? "";
+}
+
 const MAX_FILE_SIZE_BYTES = 25 * 1024 * 1024;
 const ALLOWED_UPLOAD_MIME_TYPES = new Set([
   "application/pdf",
@@ -233,6 +253,7 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
   } = form;
 
   const submissionType = useWatch({ control, name: "submissionType" });
+  const onBehalfEmail = useWatch({ control, name: "onBehalfEmail" });
   const paymentModeId = useWatch({ control, name: "paymentModeId" });
   const detailType = useWatch({ control, name: "detailType" });
   const departmentId = useWatch({ control, name: "departmentId" });
@@ -300,6 +321,29 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
     [departmentId, options.departmentRouting],
   );
 
+  const hodEmail = selectedDepartment?.hod.email ?? "";
+  const founderEmail = selectedDepartment?.founder.email ?? "";
+  const actualBeneficiaryEmail =
+    submissionType === "On Behalf" ? (onBehalfEmail ?? "") : currentUser.email;
+
+  const normalizedActualBeneficiaryEmail = actualBeneficiaryEmail.trim().toLowerCase();
+
+  const globalHodEmailSet = useMemo(
+    () =>
+      new Set(
+        options.departmentRouting
+          .map((department) => department.hod.email.trim().toLowerCase())
+          .filter((email) => email.length > 0),
+      ),
+    [options.departmentRouting],
+  );
+
+  const isGlobalHodBeneficiary =
+    normalizedActualBeneficiaryEmail.length > 0 &&
+    globalHodEmailSet.has(normalizedActualBeneficiaryEmail);
+
+  const isBypassingHod = isGlobalHodBeneficiary && Boolean(founderEmail);
+
   const isNiatDepartment = selectedDepartment?.name === NIAT_OFFLINE_LEAD_GEN_DEPARTMENT;
 
   useEffect(() => {
@@ -327,21 +371,28 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
     return selectedDepartment.hod;
   }, [currentUser.id, currentUser.isGlobalHod, selectedDepartment]);
 
-  const l1ApproverLabel = currentUser.isGlobalHod
-    ? "Approver (Finance/Senior)"
-    : "Head of Department";
-  const l1ApproverEmailLabel = currentUser.isGlobalHod ? "Approver Email" : "HOD Email";
+  const displayApprover = isBypassingHod
+    ? (selectedDepartment?.founder ?? null)
+    : resolvedL1Approver;
+
+  const displayApproverLabel = isBypassingHod
+    ? "Level 1 Approver (Bypassing HOD)"
+    : currentUser.isGlobalHod
+      ? "Approver (Finance/Senior)"
+      : "Head of Department";
+
+  const displayApproverEmail = isBypassingHod ? founderEmail : (displayApprover?.email ?? "");
 
   useEffect(() => {
     setValue("employeeName", currentUser.name, { shouldValidate: true });
   }, [currentUser.name, setValue]);
 
   useEffect(() => {
-    const hodName = resolvedL1Approver?.fullName ?? resolvedL1Approver?.email ?? "";
-    const hodEmail = resolvedL1Approver?.email ?? "";
+    const hodName = displayApprover?.fullName ?? displayApprover?.email ?? "";
+    const hodEmail = displayApproverEmail;
     setValue("hodName", hodName, { shouldValidate: true });
     setValue("hodEmail", hodEmail, { shouldValidate: true });
-  }, [resolvedL1Approver, setValue]);
+  }, [displayApprover, displayApproverEmail, setValue]);
 
   const getFirstFormErrorMessage = (
     formErrors: FieldErrors<ClaimFormDraftValues>,
@@ -413,8 +464,8 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
     }
 
     const normalizedEmployeeName = currentUser.name;
-    const normalizedHodName = resolvedL1Approver?.fullName ?? resolvedL1Approver?.email ?? "";
-    const normalizedHodEmail = resolvedL1Approver?.email ?? "";
+    const normalizedHodName = displayApprover?.fullName ?? displayApprover?.email ?? "";
+    const normalizedHodEmail = displayApproverEmail;
 
     const formData = new FormData();
     appendFormDataValue(formData, "employeeName", normalizedEmployeeName);
@@ -555,6 +606,9 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
     try {
       const formData = new FormData();
       formData.append("receiptFile", invoiceFile);
+      for (const category of options.expenseCategories) {
+        formData.append("expenseCategoryNames", category.name);
+      }
 
       const result = await parseReceiptAction(formData);
       if (!result.ok || !result.data) {
@@ -570,6 +624,10 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
       }
 
       const hasGstAmounts = parsed.cgstAmount > 0 || parsed.sgstAmount > 0 || parsed.igstAmount > 0;
+      const matchedExpenseCategoryId = resolveExpenseCategoryIdFromAi(
+        parsed.category_name,
+        options.expenseCategories,
+      );
 
       setValue("expense.billNo", parsed.billNo ?? "", {
         shouldDirty: true,
@@ -582,6 +640,11 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
         shouldValidate: true,
       });
       setValue("expense.basicAmount", parsed.basicAmount, {
+        shouldDirty: true,
+        shouldTouch: true,
+        shouldValidate: true,
+      });
+      setValue("expense.expenseCategoryId", matchedExpenseCategoryId, {
         shouldDirty: true,
         shouldTouch: true,
         shouldValidate: true,
@@ -639,10 +702,14 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
 
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div className="grid gap-1">
-                <label className="text-xs font-medium text-zinc-600 dark:text-zinc-400">
+                <label
+                  htmlFor="employeeNameReadOnly"
+                  className="text-xs font-medium text-zinc-600 dark:text-zinc-400"
+                >
                   Employee Name
                 </label>
                 <input
+                  id="employeeNameReadOnly"
                   value={currentUser.name}
                   readOnly
                   className="h-9 rounded-lg border border-zinc-200 bg-zinc-50 px-3 text-sm text-zinc-700 dark:border-zinc-700 dark:bg-zinc-800/50 dark:text-zinc-300"
@@ -650,14 +717,36 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
               </div>
 
               <div className="grid gap-1">
-                <label className="text-xs font-medium text-zinc-600 dark:text-zinc-400">
+                <label
+                  htmlFor="employeeEmailReadOnly"
+                  className="text-xs font-medium text-zinc-600 dark:text-zinc-400"
+                >
                   Employee Email
                 </label>
                 <input
+                  id="employeeEmailReadOnly"
                   value={currentUser.email}
                   readOnly
                   className="h-9 rounded-lg border border-zinc-200 bg-zinc-50 px-3 text-sm text-zinc-700 dark:border-zinc-700 dark:bg-zinc-800/50 dark:text-zinc-300"
                 />
+              </div>
+
+              <div className="grid gap-1">
+                <label
+                  htmlFor="employeeId"
+                  className="text-xs font-medium text-zinc-600 dark:text-zinc-400"
+                >
+                  Employee ID <span className="text-rose-600">*</span>
+                </label>
+                <input
+                  id="employeeId"
+                  type="text"
+                  className="h-9 rounded-lg border border-zinc-300 px-3 text-sm"
+                  {...register("employeeId")}
+                />
+                {errors.employeeId ? (
+                  <p className="text-xs text-rose-600">{errors.employeeId.message}</p>
+                ) : null}
               </div>
             </div>
           </section>
@@ -775,24 +864,6 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div className="grid gap-1">
                 <label
-                  htmlFor="employeeId"
-                  className="text-xs font-medium text-zinc-600 dark:text-zinc-400"
-                >
-                  Employee ID <span className="text-rose-600">*</span>
-                </label>
-                <input
-                  id="employeeId"
-                  type="text"
-                  className="h-9 rounded-lg border border-zinc-300 px-3 text-sm"
-                  {...register("employeeId")}
-                />
-                {errors.employeeId ? (
-                  <p className="text-xs text-rose-600">{errors.employeeId.message}</p>
-                ) : null}
-              </div>
-
-              <div className="grid gap-1">
-                <label
                   htmlFor="ccEmails"
                   className="text-xs font-medium text-zinc-600 dark:text-zinc-400"
                 >
@@ -810,13 +881,15 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
               </div>
 
               <div className="grid gap-1">
-                <label className="text-xs font-medium text-zinc-600 dark:text-zinc-400">
-                  {l1ApproverLabel}
+                <label
+                  htmlFor="l1ApproverNameReadOnly"
+                  className="text-xs font-medium text-zinc-600 dark:text-zinc-400"
+                >
+                  {displayApproverLabel}
                 </label>
                 <input
-                  value={
-                    resolvedL1Approver?.fullName ?? resolvedL1Approver?.email ?? "Not available"
-                  }
+                  id="l1ApproverNameReadOnly"
+                  value={displayApprover?.fullName ?? displayApprover?.email ?? "Not available"}
                   readOnly
                   className="h-9 rounded-lg border border-zinc-200 bg-zinc-50 px-3 text-sm text-zinc-700 dark:border-zinc-700 dark:bg-zinc-800/50 dark:text-zinc-300"
                 />
@@ -826,11 +899,15 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
               </div>
 
               <div className="grid gap-1">
-                <label className="text-xs font-medium text-zinc-600 dark:text-zinc-400">
-                  {l1ApproverEmailLabel}
+                <label
+                  htmlFor="l1ApproverEmailReadOnly"
+                  className="text-xs font-medium text-zinc-600 dark:text-zinc-400"
+                >
+                  {displayApproverLabel} Email
                 </label>
                 <input
-                  value={resolvedL1Approver?.email ?? "Not available"}
+                  id="l1ApproverEmailReadOnly"
+                  value={displayApproverEmail || "Not available"}
                   readOnly
                   className="h-9 rounded-lg border border-zinc-200 bg-zinc-50 px-3 text-sm text-zinc-700 dark:border-zinc-700 dark:bg-zinc-800/50 dark:text-zinc-300"
                 />
@@ -1055,6 +1132,7 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
                     className="h-9 w-full rounded-lg border border-zinc-300 px-3 text-sm"
                     {...register("expense.expenseCategoryId")}
                   >
+                    <option value="">Select Expense Category</option>
                     {options.expenseCategories.map((option) => (
                       <option key={option.id} value={option.id}>
                         {option.name}

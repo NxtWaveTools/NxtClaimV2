@@ -91,6 +91,8 @@ function createRepository(overrides?: Partial<ClaimRepository>): ClaimRepository
     createClaimAuditLog: jest.fn(async () => ({ errorMessage: null })),
     getClaimAuditLogs: jest.fn(async () => ({ data: [], errorMessage: null })),
     getClaimForFinanceEdit: jest.fn(async () => ({ data: null, errorMessage: null })),
+    getClaimForSubmitterDelete: jest.fn(async () => ({ data: null, errorMessage: null })),
+    softDeleteClaimBySubmitter: jest.fn(async () => ({ success: true, errorMessage: null })),
     updateClaimDetailsByFinance: jest.fn(async () => ({ errorMessage: null })),
     getMyClaims: jest.fn(async () => ({ data: [], errorMessage: null })),
     getMyClaimsPaginated: jest.fn(async () => ({
@@ -170,7 +172,7 @@ describe("SubmitClaimService", () => {
     );
   });
 
-  test("Should escalate and assign Department approver_2 when approver_1 submits their own claim", async () => {
+  test("Routes to Founder when an HOD submits their own claim directly.", async () => {
     const repository = createRepository({
       isUserApprover1InAnyDepartment: jest.fn(async () => ({
         isApprover1: true,
@@ -249,7 +251,7 @@ describe("SubmitClaimService", () => {
     expect(repository.getPaymentModeById).not.toHaveBeenCalled();
   });
 
-  test("routes proxy submission for HOD beneficiary to that HOD as L1 approver", async () => {
+  test("Routes to Founder when an employee submits on behalf of an HOD.", async () => {
     const beneficiaryHodId = departmentApprover1Id;
     const repository = createRepository({
       getActiveUserIdByEmail: jest.fn(async () => ({
@@ -276,7 +278,37 @@ describe("SubmitClaimService", () => {
     expect(repository.createClaimWithDetail).toHaveBeenCalledWith(
       expect.objectContaining({
         on_behalf_of_id: beneficiaryHodId,
-        assigned_l1_approver_id: beneficiaryHodId,
+        assigned_l1_approver_id: departmentApprover2Id,
+        initial_status: "Submitted - Awaiting HOD approval",
+      }),
+    );
+  });
+
+  test("Routes to Founder when a normal user submits On Behalf of HOD X to Department Y (Cross-Department Proxy)", async () => {
+    const crossDepartmentHodId = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+    const repository = createRepository({
+      isUserApprover1InAnyDepartment: jest.fn(async (userId: string) => ({
+        isApprover1: userId === crossDepartmentHodId,
+        errorMessage: null,
+      })),
+    });
+    const logger = createLogger();
+    const service = new SubmitClaimService({ repository, logger });
+
+    await service.execute({
+      ...baseInput,
+      submissionType: "On Behalf",
+      onBehalfEmail: "hod-cross-dept@nxtwave.co.in",
+      onBehalfEmployeeCode: "EMP-HOD-X",
+      onBehalfOfId: crossDepartmentHodId,
+      submittedBy: submitterId,
+    });
+
+    expect(repository.isUserApprover1InAnyDepartment).toHaveBeenCalledWith(crossDepartmentHodId);
+    expect(repository.createClaimWithDetail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        on_behalf_of_id: crossDepartmentHodId,
+        assigned_l1_approver_id: departmentApprover2Id,
         initial_status: "Submitted - Awaiting HOD approval",
       }),
     );

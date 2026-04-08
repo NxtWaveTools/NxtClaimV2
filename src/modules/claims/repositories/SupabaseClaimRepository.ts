@@ -108,6 +108,11 @@ type ClaimAuditLogActorRow = {
   email: string | null;
 };
 
+type ClaimAuditLogClaimRow = {
+  assigned_l1_approver_id: string | null;
+  l1_approver_user: ClaimAuditLogActorRow | ClaimAuditLogActorRow[] | null;
+};
+
 type ClaimAuditLogRow = {
   id: string;
   claim_id: string;
@@ -118,6 +123,7 @@ type ClaimAuditLogRow = {
   created_at: string;
   actor: ClaimAuditLogActorRow | ClaimAuditLogActorRow[] | null;
   assigned_to: ClaimAuditLogActorRow | ClaimAuditLogActorRow[] | null;
+  claim?: ClaimAuditLogClaimRow | ClaimAuditLogClaimRow[] | null;
 };
 
 type DepartmentApproverRoleRow = {
@@ -274,6 +280,12 @@ type ClaimFinanceEditRow = {
   submitted_by: string;
   expense_details: ClaimFinanceEditExpenseRow | ClaimFinanceEditExpenseRow[] | null;
   advance_details: ClaimFinanceEditAdvanceRow | ClaimFinanceEditAdvanceRow[] | null;
+};
+
+type ClaimDeleteSnapshotRow = {
+  id: string;
+  status: DbClaimStatus;
+  submitted_by: string;
 };
 
 type ExportClaimUserRow = {
@@ -784,6 +796,19 @@ function mapPendingApprovalRows(rows: GetPendingApprovalsRow[]) {
 function mapClaimAuditLogRow(row: ClaimAuditLogRow): ClaimAuditLogRecord {
   const actor = getSingleRelation(row.actor);
   const assignedTo = getSingleRelation(row.assigned_to);
+  const claim = getSingleRelation(row.claim);
+  const claimL1Approver = getSingleRelation(claim?.l1_approver_user);
+  const isSubmittedAction = row.action_type === "SUBMITTED";
+
+  const effectiveAssignedToId = isSubmittedAction
+    ? (claim?.assigned_l1_approver_id ?? row.assigned_to_id)
+    : row.assigned_to_id;
+  const effectiveAssignedToName = isSubmittedAction
+    ? (claimL1Approver?.full_name ?? assignedTo?.full_name ?? null)
+    : (assignedTo?.full_name ?? null);
+  const effectiveAssignedToEmail = isSubmittedAction
+    ? (claimL1Approver?.email ?? assignedTo?.email ?? null)
+    : (assignedTo?.email ?? null);
 
   return {
     id: row.id,
@@ -792,9 +817,9 @@ function mapClaimAuditLogRow(row: ClaimAuditLogRow): ClaimAuditLogRecord {
     actorName: actor?.full_name ?? null,
     actorEmail: actor?.email ?? null,
     actionType: row.action_type,
-    assignedToId: row.assigned_to_id,
-    assignedToName: assignedTo?.full_name ?? null,
-    assignedToEmail: assignedTo?.email ?? null,
+    assignedToId: effectiveAssignedToId,
+    assignedToName: effectiveAssignedToName,
+    assignedToEmail: effectiveAssignedToEmail,
     remarks: row.remarks,
     createdAt: row.created_at,
   };
@@ -1806,6 +1831,92 @@ export class SupabaseClaimRepository implements ClaimRepository {
     };
   }
 
+  async getClaimForSubmitterDelete(claimId: string): Promise<{
+    data: {
+      id: string;
+      status: DbClaimStatus;
+      submittedBy: string;
+    } | null;
+    errorMessage: string | null;
+  }> {
+    const client = getServiceRoleSupabaseClient();
+    const { data, error } = await client
+      .from("claims")
+      .select("id, status, submitted_by")
+      .eq("id", claimId)
+      .eq("is_active", true)
+      .maybeSingle();
+
+    if (error) {
+      return { data: null, errorMessage: error.message };
+    }
+
+    if (!data) {
+      return { data: null, errorMessage: null };
+    }
+
+    const row = data as ClaimDeleteSnapshotRow;
+
+    return {
+      data: {
+        id: row.id,
+        status: row.status,
+        submittedBy: row.submitted_by,
+      },
+      errorMessage: null,
+    };
+  }
+
+  async softDeleteClaimBySubmitter(
+    claimId: string,
+    actorUserId: string,
+  ): Promise<{ success: boolean; errorMessage: string | null }> {
+    const client = getServiceRoleSupabaseClient();
+    const { data: updatedClaim, error: claimError } = await client
+      .from("claims")
+      .update({
+        is_active: false,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", claimId)
+      .eq("submitted_by", actorUserId)
+      .eq("is_active", true)
+      .select("id")
+      .maybeSingle();
+
+    if (claimError) {
+      return { success: false, errorMessage: claimError.message };
+    }
+
+    if (!updatedClaim) {
+      return { success: false, errorMessage: "Claim not found or already deleted." };
+    }
+
+    const [{ error: expenseDeactivateError }, { error: advanceDeactivateError }] =
+      await Promise.all([
+        client
+          .from("expense_details")
+          .update({ is_active: false })
+          .eq("claim_id", claimId)
+          .eq("is_active", true),
+        client
+          .from("advance_details")
+          .update({ is_active: false })
+          .eq("claim_id", claimId)
+          .eq("is_active", true),
+      ]);
+
+    if (expenseDeactivateError) {
+      return { success: false, errorMessage: expenseDeactivateError.message };
+    }
+
+    if (advanceDeactivateError) {
+      return { success: false, errorMessage: advanceDeactivateError.message };
+    }
+
+    return { success: true, errorMessage: null };
+  }
+
   async updateClaimDetailsByFinance(
     claimId: string,
     payload: FinanceClaimEditPayload,
@@ -2369,7 +2480,7 @@ export class SupabaseClaimRepository implements ClaimRepository {
     const { data, error } = await client
       .from("claim_audit_logs")
       .select(
-        "id, claim_id, actor_id, action_type, assigned_to_id, remarks, created_at, actor:users!claim_audit_logs_actor_id_fkey(full_name, email), assigned_to:users!claim_audit_logs_assigned_to_id_fkey(full_name, email)",
+        "id, claim_id, actor_id, action_type, assigned_to_id, remarks, created_at, actor:users!claim_audit_logs_actor_id_fkey(full_name, email), assigned_to:users!claim_audit_logs_assigned_to_id_fkey(full_name, email), claim:claims!claim_audit_logs_claim_id_fkey(assigned_l1_approver_id, l1_approver_user:users!claims_assigned_l1_approver_id_fkey(full_name, email))",
       )
       .eq("claim_id", claimId)
       .order("created_at", { ascending: true });
@@ -2398,7 +2509,7 @@ export class SupabaseClaimRepository implements ClaimRepository {
     const { data, error } = await client
       .from("claim_audit_logs")
       .select(
-        "id, claim_id, actor_id, action_type, assigned_to_id, remarks, created_at, actor:users!claim_audit_logs_actor_id_fkey(full_name, email), assigned_to:users!claim_audit_logs_assigned_to_id_fkey(full_name, email)",
+        "id, claim_id, actor_id, action_type, assigned_to_id, remarks, created_at, actor:users!claim_audit_logs_actor_id_fkey(full_name, email), assigned_to:users!claim_audit_logs_assigned_to_id_fkey(full_name, email), claim:claims!claim_audit_logs_claim_id_fkey(assigned_l1_approver_id, l1_approver_user:users!claims_assigned_l1_approver_id_fkey(full_name, email))",
       )
       .in("claim_id", scopedClaimIds)
       .order("created_at", { ascending: true });
