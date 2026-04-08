@@ -277,7 +277,9 @@ type ClaimFinanceEditAdvanceRow = {
 type ClaimFinanceEditRow = {
   id: string;
   detail_type: "expense" | "advance";
+  status: DbClaimStatus;
   submitted_by: string;
+  assigned_l1_approver_id: string;
   expense_details: ClaimFinanceEditExpenseRow | ClaimFinanceEditExpenseRow[] | null;
   advance_details: ClaimFinanceEditAdvanceRow | ClaimFinanceEditAdvanceRow[] | null;
 };
@@ -1789,7 +1791,9 @@ export class SupabaseClaimRepository implements ClaimRepository {
     data: {
       id: string;
       detailType: "expense" | "advance";
+      status: DbClaimStatus;
       submittedBy: string;
+      assignedL1ApproverId: string;
       expenseReceiptFilePath: string | null;
       expenseBankStatementFilePath: string | null;
       advanceSupportingDocumentPath: string | null;
@@ -1800,7 +1804,7 @@ export class SupabaseClaimRepository implements ClaimRepository {
     const { data, error } = await client
       .from("claims")
       .select(
-        "id, detail_type, submitted_by, expense_details(receipt_file_path, bank_statement_file_path), advance_details(supporting_document_path)",
+        "id, detail_type, status, submitted_by, assigned_l1_approver_id, expense_details(receipt_file_path, bank_statement_file_path), advance_details(supporting_document_path)",
       )
       .eq("id", claimId)
       .eq("is_active", true)
@@ -1822,7 +1826,9 @@ export class SupabaseClaimRepository implements ClaimRepository {
       data: {
         id: row.id,
         detailType: row.detail_type,
+        status: row.status,
         submittedBy: row.submitted_by,
+        assignedL1ApproverId: row.assigned_l1_approver_id,
         expenseReceiptFilePath: expense?.receipt_file_path ?? null,
         expenseBankStatementFilePath: expense?.bank_statement_file_path ?? null,
         advanceSupportingDocumentPath: advance?.supporting_document_path ?? null,
@@ -1926,8 +1932,6 @@ export class SupabaseClaimRepository implements ClaimRepository {
     const { data: updatedClaim, error: claimError } = await client
       .from("claims")
       .update({
-        department_id: payload.departmentId,
-        payment_mode_id: payload.paymentModeId,
         updated_at: new Date().toISOString(),
       })
       .eq("id", claimId)
