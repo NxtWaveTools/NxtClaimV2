@@ -93,7 +93,9 @@ function AuditModeTabs({
           key={tab.key}
           role="tab"
           type="button"
-          aria-selected={activeTab === tab.key}
+          {...(activeTab === tab.key
+            ? ({ "aria-selected": "true" } as const)
+            : ({ "aria-selected": "false" } as const))}
           aria-controls={`audit-viewer-panel-${tab.key}`}
           onClick={() => {
             onSelect(tab.key);
@@ -306,8 +308,7 @@ export function ApprovalsAuditModeDialog({
               <div className="pointer-events-none absolute bottom-0 left-1/3 h-64 w-64 rounded-full bg-violet-200/20 blur-3xl dark:bg-violet-500/10" />
 
               <div
-                className="relative flex h-dvh w-screen flex-col text-zinc-950 shadow-[0_30px_120px_-20px_rgba(15,23,42,0.4)] dark:text-zinc-50"
-                style={{ animation: "slideInFromRight 0.28s cubic-bezier(0.22,1,0.36,1) both" }}
+                className="relative flex h-dvh w-screen flex-col text-zinc-950 shadow-[0_30px_120px_-20px_rgba(15,23,42,0.4)] [animation:slideInFromRight_0.28s_cubic-bezier(0.22,1,0.36,1)_both] dark:text-zinc-50"
                 role="dialog"
                 aria-modal="true"
                 aria-labelledby={`claim-review-title-${claimId}`}
