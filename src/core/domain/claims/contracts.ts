@@ -299,7 +299,8 @@ export type ClaimAuditActionType =
   | "L1_REJECTED"
   | "L2_APPROVED"
   | "L2_REJECTED"
-  | "L2_MARK_PAID";
+  | "L2_MARK_PAID"
+  | "ADMIN_SOFT_DELETED";
 
 export type ClaimAuditLogRecord = {
   id: string;
