@@ -284,6 +284,36 @@ describe("SubmitClaimService", () => {
     );
   });
 
+  test("Routes to Founder when a normal user submits On Behalf of HOD X to Department Y (Cross-Department Proxy)", async () => {
+    const crossDepartmentHodId = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+    const repository = createRepository({
+      isUserApprover1InAnyDepartment: jest.fn(async (userId: string) => ({
+        isApprover1: userId === crossDepartmentHodId,
+        errorMessage: null,
+      })),
+    });
+    const logger = createLogger();
+    const service = new SubmitClaimService({ repository, logger });
+
+    await service.execute({
+      ...baseInput,
+      submissionType: "On Behalf",
+      onBehalfEmail: "hod-cross-dept@nxtwave.co.in",
+      onBehalfEmployeeCode: "EMP-HOD-X",
+      onBehalfOfId: crossDepartmentHodId,
+      submittedBy: submitterId,
+    });
+
+    expect(repository.isUserApprover1InAnyDepartment).toHaveBeenCalledWith(crossDepartmentHodId);
+    expect(repository.createClaimWithDetail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        on_behalf_of_id: crossDepartmentHodId,
+        assigned_l1_approver_id: departmentApprover2Id,
+        initial_status: "Submitted - Awaiting HOD approval",
+      }),
+    );
+  });
+
   test("routes proxy submission for founder beneficiary to department approver_2", async () => {
     const beneficiaryFounderId = departmentApprover2Id;
     const repository = createRepository({

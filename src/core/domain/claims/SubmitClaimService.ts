@@ -157,18 +157,18 @@ export class SubmitClaimService {
         );
       }
 
-      const effectiveUserIdResult = await this.resolveEffectiveUserId(input);
-      if (effectiveUserIdResult.errorCode || !effectiveUserIdResult.effectiveUserId) {
+      const beneficiaryResolutionResult = await this.resolveEffectiveUserId(input);
+      if (beneficiaryResolutionResult.errorCode || !beneficiaryResolutionResult.effectiveUserId) {
         return {
           claimId: null,
-          errorCode: effectiveUserIdResult.errorCode ?? "BENEFICIARY_RESOLUTION_FAILED",
+          errorCode: beneficiaryResolutionResult.errorCode ?? "BENEFICIARY_RESOLUTION_FAILED",
           errorMessage:
-            effectiveUserIdResult.errorMessage ?? "Failed to resolve the beneficiary user.",
+            beneficiaryResolutionResult.errorMessage ?? "Failed to resolve the beneficiary user.",
         };
       }
 
-      const effectiveUserId = effectiveUserIdResult.effectiveUserId;
-      const isProxySubmission = input.submittedBy !== effectiveUserId;
+      const actualBeneficiaryId = beneficiaryResolutionResult.effectiveUserId;
+      const isProxySubmission = input.submittedBy !== actualBeneficiaryId;
 
       const departmentApproversResult = await this.repository.getDepartmentApprovers(
         input.departmentId,
@@ -190,7 +190,7 @@ export class SubmitClaimService {
       }
 
       const beneficiaryRoleResult =
-        await this.repository.isUserApprover1InAnyDepartment(effectiveUserId);
+        await this.repository.isUserApprover1InAnyDepartment(actualBeneficiaryId);
       if (beneficiaryRoleResult.errorMessage) {
         return {
           claimId: null,
@@ -202,31 +202,31 @@ export class SubmitClaimService {
       const isBeneficiaryAnHod = beneficiaryRoleResult.isApprover1;
       const departmentApprover1Id = departmentApproversResult.data.approver1Id;
       const departmentApprover2Id = departmentApproversResult.data.approver2Id;
-      const isBeneficiaryDepartmentApprover1 = effectiveUserId === departmentApprover1Id;
-      const isBeneficiaryDepartmentApprover2 = effectiveUserId === departmentApprover2Id;
+      const isBeneficiaryDepartmentApprover1 = actualBeneficiaryId === departmentApprover1Id;
+      const isBeneficiaryDepartmentApprover2 = actualBeneficiaryId === departmentApprover2Id;
 
       // Beneficiary-centric routing:
       // - Proxy for department approver_1 routes to approver_2 to prevent self-approval.
       // - Proxy for department approver_2 routes to approver_2 (senior approver path).
-      // - Self submission by any HOD/approver_1 leapfrogs to approver_2.
+      // - Any submission whose beneficiary is a global HOD leapfrogs to approver_2.
       // - All other submissions route to approver_1.
-      const isGlobalHodSelfSubmission = isBeneficiaryAnHod && !isProxySubmission;
+      const isGlobalHodBeneficiary = isBeneficiaryAnHod;
+      const isGlobalHodSelfSubmission = isGlobalHodBeneficiary && !isProxySubmission;
+      const requiresFounderEscalation = isProxySubmission
+        ? isBeneficiaryDepartmentApprover1 ||
+          isBeneficiaryDepartmentApprover2 ||
+          isGlobalHodBeneficiary
+        : isGlobalHodSelfSubmission;
 
-      const assignedL1ApproverId = isProxySubmission
-        ? isBeneficiaryDepartmentApprover1
-          ? departmentApprover2Id
-          : isBeneficiaryDepartmentApprover2
-            ? departmentApprover2Id
-            : departmentApprover1Id
-        : isGlobalHodSelfSubmission
-          ? departmentApprover2Id
-          : departmentApprover1Id;
+      const assignedL1ApproverId = requiresFounderEscalation
+        ? departmentApprover2Id
+        : departmentApprover1Id;
 
       if (!assignedL1ApproverId) {
         return {
           claimId: null,
           errorCode: "DEPARTMENT_ROUTING_MISSING",
-          errorMessage: isGlobalHodSelfSubmission
+          errorMessage: requiresFounderEscalation
             ? "Escalation approver is not configured for this department."
             : "Department approver routing is not configured.",
         };
@@ -241,7 +241,7 @@ export class SubmitClaimService {
         submission_type: input.submissionType,
         detail_type: input.detailType,
         submitted_by: input.submittedBy,
-        on_behalf_of_id: effectiveUserId,
+        on_behalf_of_id: actualBeneficiaryId,
         employee_id: input.employeeId,
         cc_emails: input.ccEmails,
         on_behalf_email: input.onBehalfEmail,

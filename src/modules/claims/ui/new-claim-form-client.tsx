@@ -326,13 +326,23 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
   const actualBeneficiaryEmail =
     submissionType === "On Behalf" ? (onBehalfEmail ?? "") : currentUser.email;
 
-  const normalizedHodEmail = hodEmail.trim().toLowerCase();
   const normalizedActualBeneficiaryEmail = actualBeneficiaryEmail.trim().toLowerCase();
 
-  const isBypassingHod =
+  const globalHodEmailSet = useMemo(
+    () =>
+      new Set(
+        options.departmentRouting
+          .map((department) => department.hod.email.trim().toLowerCase())
+          .filter((email) => email.length > 0),
+      ),
+    [options.departmentRouting],
+  );
+
+  const isGlobalHodBeneficiary =
     normalizedActualBeneficiaryEmail.length > 0 &&
-    normalizedActualBeneficiaryEmail === normalizedHodEmail &&
-    Boolean(founderEmail);
+    globalHodEmailSet.has(normalizedActualBeneficiaryEmail);
+
+  const isBypassingHod = isGlobalHodBeneficiary && Boolean(founderEmail);
 
   const isNiatDepartment = selectedDepartment?.name === NIAT_OFFLINE_LEAD_GEN_DEPARTMENT;
 

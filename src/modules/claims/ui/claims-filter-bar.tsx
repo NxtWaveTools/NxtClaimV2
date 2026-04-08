@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { toast } from "sonner";
 import { useSessionStorage } from "@/hooks/use-session-storage";
 import { ROUTES } from "@/core/config/route-registry";
 import { DB_CLAIM_STATUSES } from "@/core/constants/statuses";
@@ -68,6 +69,17 @@ function resolveSmartDateTarget(status: string): ClaimDateTarget {
   }
 
   return "submitted";
+}
+
+function parseIsoDateOnly(value: string): Date | null {
+  const isoDatePattern = /^\d{4}-\d{2}-\d{2}$/;
+
+  if (!isoDatePattern.test(value)) {
+    return null;
+  }
+
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
 function hasActiveFilterParams(params: URLSearchParams): boolean {
@@ -551,6 +563,14 @@ export function ClaimsFilterBar({
   }
 
   async function handleExportXlsx(): Promise<void> {
+    const parsedStartDate = parseIsoDateOnly((searchParams.get("from") ?? "").trim());
+    const parsedEndDate = parseIsoDateOnly((searchParams.get("to") ?? "").trim());
+
+    if (!parsedStartDate || !parsedEndDate || parsedEndDate < parsedStartDate) {
+      toast.error("Please apply a date range filter before exporting.");
+      return;
+    }
+
     if (isExporting || !exportScope) {
       return;
     }
@@ -612,7 +632,11 @@ export function ClaimsFilterBar({
       anchor.remove();
       URL.revokeObjectURL(objectUrl);
     } catch (error) {
-      console.error("claims.export.failed", error);
+      const fallbackMessage = "Could not export claims. Please try again.";
+      const message =
+        error instanceof Error && error.message.trim().length > 0 ? error.message : fallbackMessage;
+
+      toast.error(message);
     } finally {
       setIsExporting(false);
     }
