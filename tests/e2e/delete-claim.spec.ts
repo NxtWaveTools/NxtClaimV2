@@ -192,18 +192,13 @@ async function acceptPolicyGateIfPresent(page: Page): Promise<void> {
   await expect(policyGateHeading).toBeHidden({ timeout: 30000 });
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 async function ensureAuthenticated(page: Page, email: string): Promise<void> {
   await gotoWithRetry(page, "/dashboard");
   await acceptPolicyGateIfPresent(page);
-
-  const signOutButton = page.getByRole("button", { name: /sign out/i });
-  const hasSession =
-    !/\/auth\/login/i.test(page.url()) &&
-    (await signOutButton.isVisible({ timeout: 3000 }).catch(() => false));
-
-  if (hasSession) {
-    return;
-  }
 
   const loginResponse = await page.request.post("/api/auth/email-login", {
     data: { email, password: DEFAULT_PASSWORD },
@@ -234,6 +229,9 @@ async function ensureAuthenticated(page: Page, email: string): Promise<void> {
   await gotoWithRetry(page, "/dashboard");
   await acceptPolicyGateIfPresent(page);
   await expect(page).not.toHaveURL(/\/auth\/login/i);
+  await expect(
+    page.getByRole("heading", { name: new RegExp(escapeRegExp(email), "i") }).first(),
+  ).toBeVisible({ timeout: 15000 });
 }
 
 async function openClaimForm(page: Page, email: string): Promise<void> {
