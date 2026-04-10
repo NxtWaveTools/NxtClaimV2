@@ -33,6 +33,7 @@ import { ClaimFullDetailsGrid } from "@/modules/claims/ui/claim-full-details-gri
 import { DeleteClaimButton } from "@/modules/claims/ui/delete-claim-button";
 import { formatDateTime } from "@/lib/format";
 import { pageBodyFont, pageDisplayFont } from "@/lib/fonts";
+import { sanitizeDashboardReturnToPath } from "@/lib/pagination-helpers";
 import {
   getAvailableClaimActions,
   type ClaimActionRole,
@@ -53,7 +54,7 @@ const FinanceEditClaimForm = dynamic(
 
 type PageProps = {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ view?: string | string[] }>;
+  searchParams: Promise<{ view?: string | string[]; returnTo?: string | string[] }>;
 };
 
 type EvidenceItem = {
@@ -70,6 +71,14 @@ type EvidencePath = {
 type ClaimDetailRecord = NonNullable<
   Awaited<ReturnType<SupabaseClaimRepository["getClaimDetailById"]>>["data"]
 >;
+
+function firstSearchParamValue(value: string | string[] | undefined): string | undefined {
+  if (Array.isArray(value)) {
+    return value[0];
+  }
+
+  return value;
+}
 
 function formatOptionalText(value: string | null | undefined, fallback = "N/A"): string {
   if (!value) {
@@ -308,14 +317,17 @@ function FinanceEditClaimSkeleton() {
 async function ClaimDetailBackButton({
   searchParams,
 }: {
-  searchParams: Promise<{ view?: string | string[] }>;
+  searchParams: Promise<{ view?: string | string[]; returnTo?: string | string[] }>;
 }) {
   const resolvedSearchParams = await searchParams;
-  const viewParam = Array.isArray(resolvedSearchParams.view)
-    ? resolvedSearchParams.view[0]
-    : resolvedSearchParams.view;
+  const viewParam = firstSearchParamValue(resolvedSearchParams.view);
+  const returnToParam = firstSearchParamValue(resolvedSearchParams.returnTo);
+  const safeReturnTo = sanitizeDashboardReturnToPath(returnToParam);
   const backHref =
-    viewParam === "approvals" ? `${ROUTES.claims.myClaims}?view=approvals` : ROUTES.claims.myClaims;
+    safeReturnTo ??
+    (viewParam === "approvals"
+      ? `${ROUTES.claims.myClaims}?view=approvals`
+      : ROUTES.claims.myClaims);
 
   return <BackButton className="w-fit" fallbackHref={backHref} />;
 }
@@ -436,9 +448,18 @@ async function EvidenceGallerySection({ evidencePaths }: { evidencePaths: Eviden
   );
 }
 
-async function ClaimDetailCore({ params }: { params: Promise<{ id: string }> }) {
-  const resolvedParams = await params;
+async function ClaimDetailCore({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ view?: string | string[]; returnTo?: string | string[] }>;
+}) {
+  const [resolvedParams, resolvedSearchParams] = await Promise.all([params, searchParams]);
   const claimId = resolvedParams.id;
+  const fallbackReturnPath = `${ROUTES.claims.myClaims}?view=approvals`;
+  const returnToParam = firstSearchParamValue(resolvedSearchParams.returnTo);
+  const returnToPath = sanitizeDashboardReturnToPath(returnToParam) ?? fallbackReturnPath;
   const claimRepository = new SupabaseClaimRepository();
 
   const [currentUserResult, claimResult, isAdminUser] = await Promise.all([
@@ -473,7 +494,7 @@ async function ClaimDetailCore({ params }: { params: Promise<{ id: string }> }) 
           Unable to load claim detail. {claimResult.errorMessage}
         </p>
         <Link
-          href={`${ROUTES.claims.myClaims}?view=approvals`}
+          href={returnToPath}
           className="mt-4 inline-flex text-sm font-medium text-indigo-500 hover:text-indigo-400"
         >
           Back to approvals
@@ -551,7 +572,11 @@ async function ClaimDetailCore({ params }: { params: Promise<{ id: string }> }) 
 
   const approveFromDetail = async () => {
     "use server";
-    await approveClaimAction({ claimId: claim.id });
+    await approveClaimAction({
+      claimId: claim.id,
+      redirectToApprovalsView: true,
+      returnTo: returnToPath,
+    });
   };
 
   const rejectFromDetail = async (formData: FormData) => {
@@ -560,6 +585,8 @@ async function ClaimDetailCore({ params }: { params: Promise<{ id: string }> }) 
     const allowResubmission = formData.get("allowResubmission") === "true";
     await rejectClaimAction({
       claimId: claim.id,
+      redirectToApprovalsView: true,
+      returnTo: returnToPath,
       rejectionReason,
       allowResubmission,
     });
@@ -567,7 +594,11 @@ async function ClaimDetailCore({ params }: { params: Promise<{ id: string }> }) 
 
   const approveFinanceFromDetail = async () => {
     "use server";
-    await approveFinanceAction({ claimId: claim.id });
+    await approveFinanceAction({
+      claimId: claim.id,
+      redirectToApprovalsView: true,
+      returnTo: returnToPath,
+    });
   };
 
   const rejectFinanceFromDetail = async (formData: FormData) => {
@@ -576,6 +607,8 @@ async function ClaimDetailCore({ params }: { params: Promise<{ id: string }> }) 
     const allowResubmission = formData.get("allowResubmission") === "true";
     await rejectFinanceAction({
       claimId: claim.id,
+      redirectToApprovalsView: true,
+      returnTo: returnToPath,
       rejectionReason,
       allowResubmission,
     });
@@ -583,7 +616,11 @@ async function ClaimDetailCore({ params }: { params: Promise<{ id: string }> }) 
 
   const markPaidFromDetail = async () => {
     "use server";
-    await markPaymentDoneAction({ claimId: claim.id });
+    await markPaymentDoneAction({
+      claimId: claim.id,
+      redirectToApprovalsView: true,
+      returnTo: returnToPath,
+    });
   };
 
   const submitterDisplayName = formatOptionalText(claim.submitterName ?? claim.submitter);
@@ -737,7 +774,7 @@ async function ClaimDetailCore({ params }: { params: Promise<{ id: string }> }) 
                 loadingMessage="Marking payment as done..."
                 successMessage="Claim marked as paid."
                 errorMessage="Unable to mark payment as done."
-                redirectToHref={`${ROUTES.claims.myClaims}?view=approvals`}
+                redirectToHref={returnToPath}
               />
             ) : canTakeFinanceAuthorizationDecision ? (
               <>
@@ -747,11 +784,11 @@ async function ClaimDetailCore({ params }: { params: Promise<{ id: string }> }) 
                   loadingMessage="Approving finance step..."
                   successMessage="Finance decision approved."
                   errorMessage="Unable to approve finance step."
-                  redirectToHref={`${ROUTES.claims.myClaims}?view=approvals`}
+                  redirectToHref={returnToPath}
                 />
                 <ClaimRejectWithReasonForm
                   action={rejectFinanceFromDetail}
-                  redirectToHref={`${ROUTES.claims.myClaims}?view=approvals`}
+                  redirectToHref={returnToPath}
                 />
               </>
             ) : (
@@ -762,11 +799,11 @@ async function ClaimDetailCore({ params }: { params: Promise<{ id: string }> }) 
                   loadingMessage="Approving claim..."
                   successMessage="Claim approved."
                   errorMessage="Unable to approve claim."
-                  redirectToHref={`${ROUTES.claims.myClaims}?view=approvals`}
+                  redirectToHref={returnToPath}
                 />
                 <ClaimRejectWithReasonForm
                   action={rejectFromDetail}
-                  redirectToHref={`${ROUTES.claims.myClaims}?view=approvals`}
+                  redirectToHref={returnToPath}
                 />
               </>
             )}
@@ -826,7 +863,7 @@ export default async function ClaimDetailPage({ params, searchParams }: PageProp
 
           {/* Claim detail content */}
           <Suspense fallback={<ClaimDetailContentSkeleton />}>
-            <ClaimDetailCore params={params} />
+            <ClaimDetailCore params={params} searchParams={searchParams} />
           </Suspense>
         </main>
       </div>

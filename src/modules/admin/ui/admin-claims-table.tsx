@@ -1,11 +1,12 @@
 "use client";
 
-import { useTransition } from "react";
-import { useRouter } from "next/navigation";
+import { useMemo, useTransition } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ROUTES } from "@/core/config/route-registry";
 import { RouterLink } from "@/components/ui/router-link";
 import { TableEmptyState } from "@/components/ui/table-empty-state";
 import { softDeleteClaimAction } from "@/modules/admin/actions";
+import { appendReturnToParam, buildPathWithSearchParams } from "@/lib/pagination-helpers";
 import {
   CLAIM_STATUS_COLUMN_WIDTH_CLASSES,
   ClaimStatusBadge,
@@ -57,6 +58,12 @@ export function AdminClaimsTable({ rows }: Props) {
 
 function AdminClaimRow({ claim }: { claim: AdminClaimRecord }) {
   const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const returnToPath = useMemo(
+    () => buildPathWithSearchParams(pathname, searchParams.toString()),
+    [pathname, searchParams],
+  );
   const [isPending, startTransition] = useTransition();
 
   function handleSoftDelete() {
@@ -72,7 +79,7 @@ function AdminClaimRow({ claim }: { claim: AdminClaimRecord }) {
     <tr className="transition-colors hover:bg-zinc-50/70 dark:hover:bg-zinc-900/40">
       <td className="px-3 py-2 font-medium text-zinc-900 dark:text-zinc-100">
         <RouterLink
-          href={ROUTES.claims.detail(claim.claimId)}
+          href={appendReturnToParam(ROUTES.claims.detail(claim.claimId), returnToPath)}
           className="whitespace-nowrap text-indigo-500 hover:text-indigo-400 hover:underline"
         >
           {claim.claimId}

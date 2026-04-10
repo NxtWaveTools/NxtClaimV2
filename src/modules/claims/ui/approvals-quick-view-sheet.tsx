@@ -4,9 +4,11 @@ import Image from "next/image";
 import { ArrowLeft, Eye, PanelRightClose, PanelRightOpen, X } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { usePathname, useSearchParams } from "next/navigation";
 import { RouterLink } from "@/components/ui/router-link";
 import { ROUTES } from "@/core/config/route-registry";
 import type { ClaimAuditLogRecord } from "@/core/domain/claims/contracts";
+import { appendReturnToParam, buildPathWithSearchParams } from "@/lib/pagination-helpers";
 import { ApprovalsQuickViewProvider } from "@/modules/claims/ui/approvals-quick-view-context";
 import {
   getClaimQuickViewHydrationAction,
@@ -212,6 +214,8 @@ export function ApprovalsAuditModeDialog({
   auditLogs,
   children,
 }: ApprovalsQuickViewSheetProps) {
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const [isOpen, setIsOpen] = useState(false);
   const [isDetailsOpen, setIsDetailsOpen] = useState(true);
   const [activeEvidenceKey, setActiveEvidenceKey] = useState<string>("receipt");
@@ -219,6 +223,10 @@ export function ApprovalsAuditModeDialog({
   const [hydrationErrorMessage, setHydrationErrorMessage] = useState<string | null>(null);
   const [isHydrating, setIsHydrating] = useState(false);
   const canUseDOM = typeof window !== "undefined" && typeof document !== "undefined";
+  const returnToPath = useMemo(
+    () => buildPathWithSearchParams(pathname, searchParams.toString()),
+    [pathname, searchParams],
+  );
 
   const onBehalfContext = useMemo(() => {
     if (submissionType !== "On Behalf") {
@@ -445,7 +453,7 @@ export function ApprovalsAuditModeDialog({
                         <div className="mt-1 flex min-w-0 flex-wrap items-center gap-2">
                           <RouterLink
                             id={`claim-review-title-${claimId}`}
-                            href={ROUTES.claims.detail(claimId)}
+                            href={appendReturnToParam(ROUTES.claims.detail(claimId), returnToPath)}
                             className="truncate text-base font-bold text-indigo-600 hover:underline dark:text-indigo-400"
                           >
                             {claimId}

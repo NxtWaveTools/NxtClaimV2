@@ -32,6 +32,7 @@ import {
 import { logger } from "@/core/infra/logging/logger";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { pageBodyFont, pageDisplayFont } from "@/lib/fonts";
+import { appendReturnToParam, buildPathWithSearchParams } from "@/lib/pagination-helpers";
 import { getCachedCurrentUser } from "@/modules/auth/server/get-current-user";
 import {
   approveClaimAction,
@@ -524,6 +525,10 @@ async function ClaimsCommandCenterTable({
   const cursor = firstParamValue(searchParams?.cursor) ?? null;
   const previousCursor = firstParamValue(searchParams?.prevCursor) ?? null;
   const previousCursorToken = previousCursor ?? (cursor ? "__first__" : null);
+  const listReturnToPath = buildPathWithSearchParams(
+    ROUTES.claims.myClaims,
+    toSearchParams(searchParams).toString(),
+  );
 
   if (view === "approvals") {
     const approvalsResult = await pendingApprovalsService.execute({
@@ -799,7 +804,10 @@ async function ClaimsCommandCenterTable({
                       >
                         <td className="whitespace-nowrap px-3 py-2 font-medium text-zinc-900 dark:text-zinc-100">
                           <RouterLink
-                            href={ROUTES.claims.detail(claim.id)}
+                            href={appendReturnToParam(
+                              ROUTES.claims.detail(claim.id),
+                              listReturnToPath,
+                            )}
                             className="text-indigo-500 hover:text-indigo-400 hover:underline"
                           >
                             {claim.id}
@@ -948,7 +956,10 @@ async function ClaimsCommandCenterTable({
                     >
                       <td className="px-3 py-2 font-medium text-zinc-900 dark:text-zinc-100">
                         <RouterLink
-                          href={ROUTES.claims.detail(claim.id)}
+                          href={appendReturnToParam(
+                            ROUTES.claims.detail(claim.id),
+                            listReturnToPath,
+                          )}
                           className="whitespace-nowrap text-indigo-500 hover:text-indigo-400 hover:underline"
                         >
                           {claim.id}

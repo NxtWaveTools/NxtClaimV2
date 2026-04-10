@@ -534,7 +534,12 @@ test.describe("Delete Claim", () => {
     );
     await firstDeleteDialog.getByRole("button", { name: /^Delete$/i }).click();
 
-    await expect(firstRow).toHaveCount(0);
+    await expect
+      .poll(async () => page.locator("tbody tr", { hasText: firstClaim.claimId }).count(), {
+        timeout: 30000,
+        message: `waiting for deleted claim row ${firstClaim.claimId} to disappear from table`,
+      })
+      .toBe(0);
     await waitForClaimAndDetailsInactive(firstClaim.claimId);
 
     await submitExpenseClaim(page, {

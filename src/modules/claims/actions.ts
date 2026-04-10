@@ -32,6 +32,7 @@ import { SupabaseDepartmentRepository } from "@/modules/departments/repositories
 import { newClaimSubmitSchema } from "@/modules/claims/validators/new-claim-schema";
 import { financeEditSchema } from "@/modules/claims/validators/finance-edit-schema";
 import { formatDateTime } from "@/lib/format";
+import { sanitizeDashboardReturnToPath } from "@/lib/pagination-helpers";
 import { getViewerDepartmentIds } from "@/modules/claims/server/is-department-viewer";
 import { isAdmin } from "@/modules/admin/server/is-admin";
 import { z } from "zod";
@@ -64,6 +65,7 @@ const claimIdSchema = z.string().trim().min(1, "Claim ID is required");
 const claimDecisionSchema = z.object({
   claimId: claimIdSchema,
   redirectToApprovalsView: z.boolean().optional(),
+  returnTo: z.string().trim().optional(),
   rejectionReason: z.string().trim().min(5).optional(),
   allowResubmission: z.boolean().optional(),
 });
@@ -104,6 +106,24 @@ const PRE_HOD_EDITABLE_STATUSES: readonly DbClaimStatus[] = [
   DB_SUBMITTED_AWAITING_HOD_APPROVAL_STATUS,
   DB_REJECTED_RESUBMISSION_ALLOWED_STATUS,
 ];
+const APPROVALS_VIEW_REDIRECT_PATH = `${ROUTES.claims.myClaims}?view=approvals`;
+
+function resolveClaimDecisionRedirectPath(input: {
+  returnTo?: string;
+  redirectToApprovalsView?: boolean;
+}): string | null {
+  const safeReturnTo = sanitizeDashboardReturnToPath(input.returnTo);
+
+  if (safeReturnTo) {
+    return safeReturnTo;
+  }
+
+  if (input.redirectToApprovalsView) {
+    return APPROVALS_VIEW_REDIRECT_PATH;
+  }
+
+  return null;
+}
 
 class DuplicateTransactionError extends Error {
   constructor(message: string) {
@@ -1304,12 +1324,14 @@ async function processL1ClaimDecisionAction(input: {
   claimId: string;
   decision: "approve" | "reject";
   redirectToApprovalsView?: boolean;
+  returnTo?: string;
   rejectionReason?: string;
   allowResubmission?: boolean;
 }): Promise<{ ok: boolean; message?: string }> {
   const parseResult = claimDecisionSchema.safeParse({
     claimId: input.claimId,
     redirectToApprovalsView: input.redirectToApprovalsView,
+    returnTo: input.returnTo,
     rejectionReason: input.rejectionReason,
     allowResubmission: input.allowResubmission,
   });
@@ -1347,8 +1369,13 @@ async function processL1ClaimDecisionAction(input: {
   revalidatePath(ROUTES.claims.myClaims);
   revalidatePath(`${ROUTES.claims.dashboardList}/${parseResult.data.claimId}`);
 
-  if (parseResult.data.redirectToApprovalsView) {
-    redirect(`${ROUTES.claims.myClaims}?view=approvals`);
+  const redirectPath = resolveClaimDecisionRedirectPath({
+    returnTo: parseResult.data.returnTo,
+    redirectToApprovalsView: parseResult.data.redirectToApprovalsView,
+  });
+
+  if (redirectPath) {
+    redirect(redirectPath);
   }
 
   return { ok: true };
@@ -1358,12 +1385,14 @@ async function processL2ClaimDecisionAction(input: {
   claimId: string;
   decision: "approve" | "reject" | "mark-paid";
   redirectToApprovalsView?: boolean;
+  returnTo?: string;
   rejectionReason?: string;
   allowResubmission?: boolean;
 }): Promise<{ ok: boolean; message?: string }> {
   const parseResult = claimDecisionSchema.safeParse({
     claimId: input.claimId,
     redirectToApprovalsView: input.redirectToApprovalsView,
+    returnTo: input.returnTo,
     rejectionReason: input.rejectionReason,
     allowResubmission: input.allowResubmission,
   });
@@ -1401,8 +1430,13 @@ async function processL2ClaimDecisionAction(input: {
   revalidatePath(ROUTES.claims.myClaims);
   revalidatePath(`${ROUTES.claims.dashboardList}/${parseResult.data.claimId}`);
 
-  if (parseResult.data.redirectToApprovalsView) {
-    redirect(`${ROUTES.claims.myClaims}?view=approvals`);
+  const redirectPath = resolveClaimDecisionRedirectPath({
+    returnTo: parseResult.data.returnTo,
+    redirectToApprovalsView: parseResult.data.redirectToApprovalsView,
+  });
+
+  if (redirectPath) {
+    redirect(redirectPath);
   }
 
   return { ok: true };
@@ -1411,17 +1445,20 @@ async function processL2ClaimDecisionAction(input: {
 export async function approveClaimAction(input: {
   claimId: string;
   redirectToApprovalsView?: boolean;
+  returnTo?: string;
 }): Promise<{ ok: boolean; message?: string }> {
   return processL1ClaimDecisionAction({
     claimId: input.claimId,
     decision: "approve",
     redirectToApprovalsView: input.redirectToApprovalsView,
+    returnTo: input.returnTo,
   });
 }
 
 export async function rejectClaimAction(input: {
   claimId: string;
   redirectToApprovalsView?: boolean;
+  returnTo?: string;
   rejectionReason: string;
   allowResubmission: boolean;
 }): Promise<{ ok: boolean; message?: string }> {
@@ -1429,6 +1466,7 @@ export async function rejectClaimAction(input: {
     claimId: input.claimId,
     decision: "reject",
     redirectToApprovalsView: input.redirectToApprovalsView,
+    returnTo: input.returnTo,
     rejectionReason: input.rejectionReason,
     allowResubmission: input.allowResubmission,
   });
@@ -1437,17 +1475,20 @@ export async function rejectClaimAction(input: {
 export async function approveFinanceAction(input: {
   claimId: string;
   redirectToApprovalsView?: boolean;
+  returnTo?: string;
 }): Promise<{ ok: boolean; message?: string }> {
   return processL2ClaimDecisionAction({
     claimId: input.claimId,
     decision: "approve",
     redirectToApprovalsView: input.redirectToApprovalsView,
+    returnTo: input.returnTo,
   });
 }
 
 export async function rejectFinanceAction(input: {
   claimId: string;
   redirectToApprovalsView?: boolean;
+  returnTo?: string;
   rejectionReason: string;
   allowResubmission: boolean;
 }): Promise<{ ok: boolean; message?: string }> {
@@ -1455,6 +1496,7 @@ export async function rejectFinanceAction(input: {
     claimId: input.claimId,
     decision: "reject",
     redirectToApprovalsView: input.redirectToApprovalsView,
+    returnTo: input.returnTo,
     rejectionReason: input.rejectionReason,
     allowResubmission: input.allowResubmission,
   });
@@ -1463,11 +1505,13 @@ export async function rejectFinanceAction(input: {
 export async function markPaymentDoneAction(input: {
   claimId: string;
   redirectToApprovalsView?: boolean;
+  returnTo?: string;
 }): Promise<{ ok: boolean; message?: string }> {
   return processL2ClaimDecisionAction({
     claimId: input.claimId,
     decision: "mark-paid",
     redirectToApprovalsView: input.redirectToApprovalsView,
+    returnTo: input.returnTo,
   });
 }
 

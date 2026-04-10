@@ -1,11 +1,12 @@
 "use client";
 
 import { useMemo, useState, type FormEvent } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { RouterLink } from "@/components/ui/router-link";
 import { DB_CLAIM_STATUSES, type DbClaimStatus } from "@/core/constants/statuses";
 import { ROUTES } from "@/core/config/route-registry";
+import { appendReturnToParam, buildPathWithSearchParams } from "@/lib/pagination-helpers";
 import {
   approveClaimAction,
   approveFinanceAction,
@@ -100,6 +101,12 @@ export function FinanceApprovalsBulkTable({
   auditLogsByClaimId,
 }: FinanceApprovalsBulkTableProps) {
   const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const returnToPath = useMemo(
+    () => buildPathWithSearchParams(pathname, searchParams.toString()),
+    [pathname, searchParams],
+  );
   const actionFilters = normalizeFilters(filters) as Parameters<typeof bulkApprove>[0]["filters"];
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [isGlobalSelect, setIsGlobalSelect] = useState(false);
@@ -570,7 +577,7 @@ export function FinanceApprovalsBulkTable({
                   </td>
                   <td className="whitespace-nowrap px-3 py-2 font-medium text-zinc-900 dark:text-zinc-100">
                     <RouterLink
-                      href={ROUTES.claims.detail(claim.id)}
+                      href={appendReturnToParam(ROUTES.claims.detail(claim.id), returnToPath)}
                       className="text-indigo-500 hover:text-indigo-400 hover:underline"
                     >
                       {claim.id}
