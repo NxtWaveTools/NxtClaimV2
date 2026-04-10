@@ -6,6 +6,13 @@ import { useForm, useWatch, type FieldErrors } from "react-hook-form";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Sparkles } from "lucide-react";
+import { Alert } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { CurrencyInput } from "@/components/ui/currency-input";
+import { DateInput } from "@/components/ui/date-input";
+import { FormInput } from "@/components/ui/form-input";
+import { FormSelect } from "@/components/ui/form-select";
+import { FormTextarea } from "@/components/ui/form-textarea";
 import {
   submitClaimAction,
   type ClaimFormOptions,
@@ -19,6 +26,7 @@ import {
   LOCATION_TYPE_OPTIONS,
   NIAT_OFFLINE_LEAD_GEN_DEPARTMENT,
 } from "@/core/constants/location-types";
+import { AIDisclaimer } from "@/components/ui/ai-disclaimer";
 
 type NewClaimFormClientProps = {
   currentUser: CurrentUserHydration;
@@ -557,6 +565,20 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
       startNavTransition(() => {
         router.push("/dashboard/my-claims", { scroll: false });
       });
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "Failed to submit claim.";
+      const isHeaderSizeFailure =
+        /Request Header Fields Too Large/i.test(errorMessage) ||
+        /unexpected response was received from the server/i.test(errorMessage) ||
+        /Failed to fetch/i.test(errorMessage);
+
+      if (isHeaderSizeFailure) {
+        toast.error(
+          "Session cookies may be too large. Please sign out, sign in again, refresh the page, and retry submission.",
+        );
+      } else {
+        toast.error(errorMessage);
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -751,7 +773,7 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
                 >
                   Employee Name
                 </label>
-                <input
+                <FormInput
                   id="employeeNameReadOnly"
                   value={currentUser.name}
                   readOnly
@@ -766,7 +788,7 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
                 >
                   Employee Email
                 </label>
-                <input
+                <FormInput
                   id="employeeEmailReadOnly"
                   value={currentUser.email}
                   readOnly
@@ -781,7 +803,7 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
                 >
                   Employee ID <span className="text-rose-600">*</span>
                 </label>
-                <input
+                <FormInput
                   id="employeeId"
                   type="text"
                   className="h-9 rounded-lg border border-zinc-300 px-3 text-sm"
@@ -826,14 +848,14 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
                 >
                   Submission Type <span className="text-rose-600">*</span>
                 </label>
-                <select
+                <FormSelect
                   id="submissionType"
                   className="h-9 rounded-lg border border-zinc-300 px-3 text-sm"
                   {...register("submissionType")}
                 >
                   <option value="Self">Self</option>
                   <option value="On Behalf">On Behalf</option>
-                </select>
+                </FormSelect>
               </div>
 
               <div className="grid gap-1">
@@ -843,7 +865,7 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
                 >
                   Department <span className="text-rose-600">*</span>
                 </label>
-                <select
+                <FormSelect
                   id="departmentId"
                   className="h-9 rounded-lg border border-zinc-300 px-3 text-sm"
                   {...register("departmentId")}
@@ -853,7 +875,7 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
                       {option.name}
                     </option>
                   ))}
-                </select>
+                </FormSelect>
                 {errors.departmentId ? (
                   <p className="text-xs text-rose-600">{errors.departmentId.message}</p>
                 ) : null}
@@ -869,7 +891,7 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
                   >
                     On Behalf Email <span className="text-rose-600">*</span>
                   </label>
-                  <input
+                  <FormInput
                     id="onBehalfEmail"
                     type="email"
                     className="h-9 rounded-lg border border-zinc-300 px-3 text-sm"
@@ -889,7 +911,7 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
                   >
                     On Behalf Employee ID <span className="text-rose-600">*</span>
                   </label>
-                  <input
+                  <FormInput
                     id="onBehalfEmployeeCode"
                     type="text"
                     className="h-9 rounded-lg border border-zinc-300 px-3 text-sm"
@@ -912,7 +934,7 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
                 >
                   CC Emails (Optional)
                 </label>
-                <input
+                <FormInput
                   id="ccEmails"
                   type="text"
                   className="h-9 rounded-lg border border-zinc-300 px-3 text-sm"
@@ -930,7 +952,7 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
                 >
                   {displayApproverLabel}
                 </label>
-                <input
+                <FormInput
                   id="l1ApproverNameReadOnly"
                   value={displayApprover?.fullName ?? displayApprover?.email ?? "Not available"}
                   readOnly
@@ -948,7 +970,7 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
                 >
                   {displayApproverLabel} Email
                 </label>
-                <input
+                <FormInput
                   id="l1ApproverEmailReadOnly"
                   value={displayApproverEmail || "Not available"}
                   readOnly
@@ -968,7 +990,7 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
                 >
                   Payment Mode <span className="text-rose-600">*</span>
                 </label>
-                <select
+                <FormSelect
                   id="paymentModeId"
                   className="h-9 rounded-lg border border-zinc-300 px-3 text-sm"
                   {...register("paymentModeId")}
@@ -978,7 +1000,7 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
                       {option.name}
                     </option>
                   ))}
-                </select>
+                </FormSelect>
                 {errors.paymentModeId ? (
                   <p className="text-xs text-rose-600">{errors.paymentModeId.message}</p>
                 ) : null}
@@ -996,11 +1018,13 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
                 <h2 className="dashboard-font-display text-sm font-semibold tracking-[-0.01em] text-zinc-950 dark:text-zinc-50">
                   Expense Details
                 </h2>
-                <button
-                  type="button"
+                <Button
                   onClick={handleAutoFillWithAI}
                   disabled={isSubmitting || isAiParsing || !invoiceFile}
-                  className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-indigo-300 bg-indigo-50 px-2.5 py-1 text-xs font-semibold text-indigo-700 transition-all duration-200 hover:bg-indigo-100 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 dark:border-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300 dark:hover:bg-indigo-900/40"
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  className="border-indigo-300 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 dark:border-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300 dark:hover:bg-indigo-900/40"
                 >
                   {isAiParsing ? (
                     <>
@@ -1030,8 +1054,10 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
                   ) : (
                     "✨ Auto-fill with AI"
                   )}
-                </button>
+                </Button>
               </div>
+
+              <AIDisclaimer />
 
               <input type="hidden" {...register("detailType")} value="expense" />
 
@@ -1127,7 +1153,7 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
                   >
                     Bill No <span className="text-rose-600">*</span>
                   </label>
-                  <input
+                  <FormInput
                     id="billNo"
                     type="text"
                     className="h-9 rounded-lg border border-zinc-300 px-3 text-sm"
@@ -1145,7 +1171,7 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
                   >
                     Purpose <span className="text-rose-600">*</span>
                   </label>
-                  <input
+                  <FormInput
                     id="expensePurpose"
                     type="text"
                     className="h-9 rounded-lg border border-zinc-300 px-3 text-sm"
@@ -1165,7 +1191,7 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
                   >
                     Expense Category <span className="text-rose-600">*</span>
                   </label>
-                  <select
+                  <FormSelect
                     id="expenseCategoryId"
                     className="h-9 w-full rounded-lg border border-zinc-300 px-3 text-sm"
                     {...register("expense.expenseCategoryId")}
@@ -1176,7 +1202,7 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
                         {option.name}
                       </option>
                     ))}
-                  </select>
+                  </FormSelect>
                 </div>
 
                 <div className="grid gap-1">
@@ -1186,7 +1212,7 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
                   >
                     Product <span className="text-rose-600">*</span>
                   </label>
-                  <select
+                  <FormSelect
                     id="expenseProductId"
                     className="h-9 w-full rounded-lg border border-zinc-300 px-3 text-sm"
                     {...register("expense.productId")}
@@ -1196,7 +1222,7 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
                         {option.name}
                       </option>
                     ))}
-                  </select>
+                  </FormSelect>
                   {errors.expense?.productId ? (
                     <p className="text-xs text-rose-600">{errors.expense.productId.message}</p>
                   ) : null}
@@ -1211,7 +1237,7 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
                   >
                     Location <span className="text-rose-600">*</span>
                   </label>
-                  <select
+                  <FormSelect
                     id="expenseLocationId"
                     className="h-9 w-full rounded-lg border border-zinc-300 px-3 text-sm"
                     {...register("expense.locationId")}
@@ -1221,7 +1247,7 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
                         {option.name}
                       </option>
                     ))}
-                  </select>
+                  </FormSelect>
                 </div>
               </div>
 
@@ -1234,7 +1260,7 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
                     >
                       Location Type <span className="text-rose-600">*</span>
                     </label>
-                    <select
+                    <FormSelect
                       id="expenseLocationType"
                       className="h-9 w-full rounded-lg border border-zinc-300 px-3 text-sm"
                       {...register("expense.locationType")}
@@ -1245,7 +1271,7 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
                           {option.label}
                         </option>
                       ))}
-                    </select>
+                    </FormSelect>
                     {errors.expense?.locationType ? (
                       <p className="text-xs text-rose-600">{errors.expense.locationType.message}</p>
                     ) : null}
@@ -1258,7 +1284,7 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
                       >
                         Location Details <span className="text-rose-600">*</span>
                       </label>
-                      <input
+                      <FormInput
                         id="expenseLocationDetails"
                         type="text"
                         placeholder="Enter out-station location details"
@@ -1283,9 +1309,8 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
                   >
                     Transaction Date <span className="text-rose-600">*</span>
                   </label>
-                  <input
+                  <DateInput
                     id="transactionDate"
-                    type="date"
                     className="h-9 rounded-lg border border-zinc-300 px-3 text-sm"
                     {...register("expense.transactionDate")}
                   />
@@ -1298,7 +1323,7 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
                   >
                     Vendor (Optional)
                   </label>
-                  <input
+                  <FormInput
                     id="vendorName"
                     type="text"
                     className="h-9 rounded-lg border border-zinc-300 px-3 text-sm"
@@ -1322,7 +1347,7 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
                     >
                       GST Number
                     </label>
-                    <input
+                    <FormInput
                       id="gstNumber"
                       type="text"
                       className="h-9 rounded-lg border border-zinc-300 px-3 text-sm"
@@ -1339,10 +1364,8 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
                     >
                       IGST Amount
                     </label>
-                    <input
+                    <CurrencyInput
                       id="igstAmount"
-                      type="number"
-                      step="0.01"
                       className="h-9 rounded-lg border border-zinc-300 px-3 text-sm"
                       {...register("expense.igstAmount", {
                         setValueAs: toNumberOrZero,
@@ -1359,10 +1382,8 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
                     >
                       CGST Amount
                     </label>
-                    <input
+                    <CurrencyInput
                       id="cgstAmount"
-                      type="number"
-                      step="0.01"
                       className="h-9 rounded-lg border border-zinc-300 px-3 text-sm"
                       {...register("expense.cgstAmount", {
                         setValueAs: toNumberOrZero,
@@ -1377,10 +1398,8 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
                     >
                       SGST Amount
                     </label>
-                    <input
+                    <CurrencyInput
                       id="sgstAmount"
-                      type="number"
-                      step="0.01"
                       className="h-9 rounded-lg border border-zinc-300 px-3 text-sm"
                       {...register("expense.sgstAmount", {
                         setValueAs: toNumberOrZero,
@@ -1397,10 +1416,8 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
                     >
                       Basic Amount <span className="text-rose-600">*</span>
                     </label>
-                    <input
+                    <CurrencyInput
                       id="basicAmount"
-                      type="number"
-                      step="0.01"
                       className="h-9 rounded-lg border border-zinc-300 px-3 text-sm"
                       {...register("expense.basicAmount", {
                         setValueAs: toNumberOrZero,
@@ -1418,10 +1435,8 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
                     >
                       Total Amount
                     </label>
-                    <input
+                    <CurrencyInput
                       id="totalAmount"
-                      type="number"
-                      step="0.01"
                       readOnly
                       disabled
                       className="h-9 rounded-lg border border-zinc-200 bg-zinc-50 px-3 text-sm text-zinc-700 dark:border-zinc-700 dark:bg-zinc-800/50 dark:text-zinc-300"
@@ -1442,7 +1457,7 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
                   >
                     Remarks (Optional)
                   </label>
-                  <input
+                  <FormInput
                     id="expenseRemarks"
                     type="text"
                     className="h-9 rounded-lg border border-zinc-300 px-3 text-sm"
@@ -1459,7 +1474,7 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
                   >
                     People Involved (Optional)
                   </label>
-                  <textarea
+                  <FormTextarea
                     id="peopleInvolved"
                     rows={2}
                     className="rounded-lg border border-zinc-300 px-3 py-2 text-sm"
@@ -1525,10 +1540,8 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
                   >
                     Requested Amount (₹) <span className="text-rose-600">*</span>
                   </label>
-                  <input
+                  <CurrencyInput
                     id="requestedAmount"
-                    type="number"
-                    step="0.01"
                     className="h-9 rounded-lg border border-zinc-300 px-3 text-sm"
                     {...register("advance.requestedAmount", { valueAsNumber: true })}
                   />
@@ -1546,9 +1559,8 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
                   >
                     Expected Usage Date (Optional)
                   </label>
-                  <input
+                  <DateInput
                     id="expectedUsageDate"
-                    type="date"
                     className="h-9 rounded-lg border border-zinc-300 px-3 text-sm"
                     {...register("advance.expectedUsageDate", {
                       setValueAs: (value) => toNullable(String(value ?? "")),
@@ -1570,7 +1582,7 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
                   >
                     Budget Request Month <span className="text-rose-600">*</span>
                   </label>
-                  <select
+                  <FormSelect
                     id="budgetMonth"
                     className="h-9 rounded-lg border border-zinc-300 px-3 text-sm"
                     {...register("advance.budgetMonth", {
@@ -1582,7 +1594,7 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
                         {month.label}
                       </option>
                     ))}
-                  </select>
+                  </FormSelect>
                   {errors.advance?.budgetMonth ? (
                     <p className="text-xs text-rose-600">{errors.advance.budgetMonth.message}</p>
                   ) : null}
@@ -1595,7 +1607,7 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
                   >
                     Budget Request Year <span className="text-rose-600">*</span>
                   </label>
-                  <select
+                  <FormSelect
                     id="budgetYear"
                     className="h-9 rounded-lg border border-zinc-300 px-3 text-sm"
                     {...register("advance.budgetYear", {
@@ -1610,7 +1622,7 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
                         </option>
                       );
                     })}
-                  </select>
+                  </FormSelect>
                   {errors.advance?.budgetYear ? (
                     <p className="text-xs text-rose-600">{errors.advance.budgetYear.message}</p>
                   ) : null}
@@ -1624,7 +1636,7 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
                 >
                   Purpose/Reason <span className="text-rose-600">*</span>
                 </label>
-                <textarea
+                <FormTextarea
                   id="purpose"
                   rows={2}
                   className="rounded-lg border border-zinc-300 px-3 py-2 text-sm"
@@ -1641,17 +1653,9 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
       </div>
       {/* end 2-column grid */}
 
-      {fileError ? (
-        <p className="rounded-xl bg-rose-50 px-3 py-2 text-sm text-rose-700 dark:bg-rose-950/40 dark:text-rose-200">
-          {fileError}
-        </p>
-      ) : null}
+      {fileError ? <Alert tone="error" description={fileError} /> : null}
 
-      <button
-        type="submit"
-        disabled={isSubmitting}
-        className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-indigo-500/20 transition-all duration-200 hover:bg-indigo-500 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 dark:shadow-indigo-500/10"
-      >
+      <Button type="submit" disabled={isSubmitting} variant="primary" size="lg" className="w-full">
         {isSubmitting ? (
           <>
             <svg
@@ -1680,7 +1684,7 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
         ) : (
           "Submit Claim"
         )}
-      </button>
+      </Button>
     </form>
   );
 }

@@ -1,13 +1,17 @@
 "use client";
 
-import Link from "next/link";
 import { ROUTES } from "@/core/config/route-registry";
+import { useMemo } from "react";
+import { usePathname, useSearchParams } from "next/navigation";
+import { RouterLink } from "@/components/ui/router-link";
+import { TableEmptyState } from "@/components/ui/table-empty-state";
 import {
   CLAIM_STATUS_COLUMN_WIDTH_CLASSES,
   ClaimStatusBadge,
 } from "@/modules/claims/ui/claim-status-badge";
 import type { DepartmentViewerClaimRecord } from "@/core/domain/claims/contracts";
 import { formatDate, formatCurrency } from "@/lib/format";
+import { appendReturnToParam, buildPathWithSearchParams } from "@/lib/pagination-helpers";
 
 type Props = {
   rows: DepartmentViewerClaimRecord[];
@@ -16,14 +20,10 @@ type Props = {
 export function DepartmentClaimsTable({ rows }: Props) {
   if (rows.length === 0) {
     return (
-      <div className="grid place-items-center px-4 py-14 text-center">
-        <p className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
-          No claims found for your assigned departments
-        </p>
-        <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-500">
-          Adjust filters or check back later.
-        </p>
-      </div>
+      <TableEmptyState
+        title="No claims found for your assigned departments"
+        description="Adjust filters or check back later."
+      />
     );
   }
 
@@ -57,15 +57,22 @@ export function DepartmentClaimsTable({ rows }: Props) {
 }
 
 function DepartmentClaimRow({ claim }: { claim: DepartmentViewerClaimRecord }) {
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const returnToPath = useMemo(
+    () => buildPathWithSearchParams(pathname, searchParams.toString()),
+    [pathname, searchParams],
+  );
+
   return (
     <tr className="transition-colors hover:bg-zinc-50/70 dark:hover:bg-zinc-900/40">
       <td className="px-3 py-2 font-medium text-zinc-900 dark:text-zinc-100">
-        <Link
-          href={ROUTES.claims.detail(claim.claimId)}
+        <RouterLink
+          href={appendReturnToParam(ROUTES.claims.detail(claim.claimId), returnToPath)}
           className="whitespace-nowrap text-indigo-500 hover:text-indigo-400 hover:underline"
         >
           {claim.claimId}
-        </Link>
+        </RouterLink>
       </td>
       <td className="whitespace-nowrap px-3 py-2">
         <span className="inline-block max-w-45 truncate align-bottom">{claim.employeeId}</span>

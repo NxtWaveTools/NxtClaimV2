@@ -5,6 +5,7 @@ import { createServerClient } from "@supabase/ssr";
 import { serverEnv } from "@/core/config/server-env";
 import { logger } from "@/core/infra/logging/logger";
 import { getServiceRoleSupabaseClient } from "@/core/infra/supabase/server-client";
+import { applySupabaseAuthCookies } from "@/core/infra/supabase/supabase-auth-cookie-utils";
 import { getUserRoleCacheTag, USER_ROLE_CACHE_TAG } from "@/modules/auth/server/user-role-cache";
 
 const USER_ROLE_REVALIDATE_SECONDS = 60 * 60;
@@ -82,13 +83,23 @@ async function createRequestScopedSupabaseClient() {
           return cookieStore.getAll();
         },
         setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value, options }) => {
-            try {
-              cookieStore.set(name, value, options);
-            } catch {
-              // Server components may not set cookies; safe to ignore.
-            }
-          });
+          try {
+            applySupabaseAuthCookies({
+              existingCookies: cookieStore.getAll(),
+              cookiesToSet,
+              setCookie: (name, value, options) => {
+                cookieStore.set(name, value, options);
+              },
+            });
+          } catch {
+            cookiesToSet.forEach(({ name, value, options }) => {
+              try {
+                cookieStore.set(name, value, options);
+              } catch {
+                // Server components may not set cookies; safe to ignore.
+              }
+            });
+          }
         },
       },
     },

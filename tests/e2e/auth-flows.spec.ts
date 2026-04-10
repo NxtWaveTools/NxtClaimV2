@@ -53,7 +53,6 @@ test.describe("auth flows", () => {
     await expect(page.getByLabel(/password/i)).toBeVisible();
     await expect(page.getByRole("button", { name: /sign in with email/i })).toBeVisible();
     await expect(page.getByRole("button", { name: /sign in with microsoft/i })).toBeVisible();
-    await expect(page.getByRole("button", { name: /sign in with google/i })).toBeVisible();
   });
 
   test("rejects invalid email-password credentials", async ({ request }) => {

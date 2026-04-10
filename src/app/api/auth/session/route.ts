@@ -5,6 +5,7 @@ import { z } from "zod";
 import { withAuth } from "@/core/http/with-auth";
 import { serverEnv } from "@/core/config/server-env";
 import { AUTH_ERROR_CODES } from "@/core/constants/auth";
+import { applySupabaseAuthCookies } from "@/core/infra/supabase/supabase-auth-cookie-utils";
 import { createErrorResponse, createSuccessResponse } from "@/types/api";
 
 const sessionSchema = z.object({
@@ -62,8 +63,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           return cookieStore.getAll();
         },
         setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value, options }) => {
-            response.cookies.set(name, value, options);
+          applySupabaseAuthCookies({
+            existingCookies: cookieStore.getAll(),
+            cookiesToSet,
+            setCookie: (name, value, options) => {
+              response.cookies.set(name, value, options);
+            },
           });
         },
       },

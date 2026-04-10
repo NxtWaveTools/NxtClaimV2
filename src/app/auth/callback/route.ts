@@ -3,6 +3,7 @@ import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import { serverEnv } from "@/core/config/server-env";
 import { isAllowedEmailDomain } from "@/core/config/allowed-domains";
+import { applySupabaseAuthCookies } from "@/core/infra/supabase/supabase-auth-cookie-utils";
 
 export async function GET(request: Request): Promise<NextResponse> {
   const requestUrl = new URL(request.url);
@@ -26,8 +27,12 @@ export async function GET(request: Request): Promise<NextResponse> {
           return cookieStore.getAll();
         },
         setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value, options }) => {
-            response.cookies.set(name, value, options);
+          applySupabaseAuthCookies({
+            existingCookies: cookieStore.getAll(),
+            cookiesToSet,
+            setCookie: (name, value, options) => {
+              response.cookies.set(name, value, options);
+            },
           });
         },
       },

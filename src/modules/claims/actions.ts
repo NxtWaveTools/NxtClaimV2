@@ -20,6 +20,7 @@ import { BulkProcessClaimsService } from "@/core/domain/claims/BulkProcessClaims
 import { UpdateClaimByFinanceService } from "@/core/domain/claims/UpdateClaimByFinanceService";
 import { DeleteOwnClaimService } from "@/core/domain/claims/DeleteOwnClaimService";
 import type {
+  ClaimAuditLogRecord,
   ClaimDetailType,
   ClaimDropdownOption,
   FinanceClaimEditPayload,
@@ -30,6 +31,10 @@ import { SupabaseClaimRepository } from "@/modules/claims/repositories/SupabaseC
 import { SupabaseDepartmentRepository } from "@/modules/departments/repositories/SupabaseDepartmentRepository";
 import { newClaimSubmitSchema } from "@/modules/claims/validators/new-claim-schema";
 import { financeEditSchema } from "@/modules/claims/validators/finance-edit-schema";
+import { formatDateTime } from "@/lib/format";
+import { sanitizeDashboardReturnToPath } from "@/lib/pagination-helpers";
+import { getViewerDepartmentIds } from "@/modules/claims/server/is-department-viewer";
+import { isAdmin } from "@/modules/admin/server/is-admin";
 import { z } from "zod";
 
 const repository = new SupabaseClaimRepository();
@@ -60,6 +65,7 @@ const claimIdSchema = z.string().trim().min(1, "Claim ID is required");
 const claimDecisionSchema = z.object({
   claimId: claimIdSchema,
   redirectToApprovalsView: z.boolean().optional(),
+  returnTo: z.string().trim().optional(),
   rejectionReason: z.string().trim().min(5).optional(),
   allowResubmission: z.boolean().optional(),
 });
@@ -100,6 +106,24 @@ const PRE_HOD_EDITABLE_STATUSES: readonly DbClaimStatus[] = [
   DB_SUBMITTED_AWAITING_HOD_APPROVAL_STATUS,
   DB_REJECTED_RESUBMISSION_ALLOWED_STATUS,
 ];
+const APPROVALS_VIEW_REDIRECT_PATH = `${ROUTES.claims.myClaims}?view=approvals`;
+
+function resolveClaimDecisionRedirectPath(input: {
+  returnTo?: string;
+  redirectToApprovalsView?: boolean;
+}): string | null {
+  const safeReturnTo = sanitizeDashboardReturnToPath(input.returnTo);
+
+  if (safeReturnTo) {
+    return safeReturnTo;
+  }
+
+  if (input.redirectToApprovalsView) {
+    return APPROVALS_VIEW_REDIRECT_PATH;
+  }
+
+  return null;
+}
 
 class DuplicateTransactionError extends Error {
   constructor(message: string) {
@@ -149,6 +173,11 @@ export type CurrentUserHydration = {
   email: string;
   name: string;
   isGlobalHod: boolean;
+};
+
+export type ClaimQuickViewHydrationData = {
+  claim: NonNullable<Awaited<ReturnType<SupabaseClaimRepository["getClaimDetailById"]>>["data"]>;
+  auditLogs: (ClaimAuditLogRecord & { formattedCreatedAt: string })[];
 };
 
 function classifyDetailType(modeName: string): ClaimDetailType | null {
@@ -527,6 +556,93 @@ export async function getClaimFormHydrationAction(): Promise<{
       },
     },
     errorMessage: null,
+  };
+}
+
+export async function getClaimQuickViewHydrationAction(input: {
+  claimId: string;
+}): Promise<{ ok: true; data: ClaimQuickViewHydrationData } | { ok: false; message: string }> {
+  const claimParse = financeEditClaimIdSchema.safeParse(input);
+  if (!claimParse.success) {
+    return {
+      ok: false,
+      message: "Invalid claim hydration request.",
+    };
+  }
+
+  const currentUserResult = await authRepository.getCurrentUser();
+  if (
+    currentUserResult.errorMessage ||
+    !currentUserResult.user?.id ||
+    !currentUserResult.user.email
+  ) {
+    return {
+      ok: false,
+      message: currentUserResult.errorMessage ?? "Unauthorized session.",
+    };
+  }
+
+  const currentUserId = currentUserResult.user.id;
+
+  const [claimResult, claimAuditLogsResult, financeApproverIdsResult, viewerDeptIds, isAdminUser] =
+    await Promise.all([
+      repository.getClaimDetailById(claimParse.data.claimId),
+      repository.getClaimAuditLogs(claimParse.data.claimId),
+      repository.getFinanceApproverIdsForUser(currentUserId),
+      getViewerDepartmentIds(currentUserId),
+      isAdmin(),
+    ]);
+
+  if (claimResult.errorMessage) {
+    return {
+      ok: false,
+      message: claimResult.errorMessage,
+    };
+  }
+
+  if (!claimResult.data) {
+    return {
+      ok: false,
+      message: "Claim not found.",
+    };
+  }
+
+  const claim = claimResult.data;
+  const isFinanceActor =
+    !financeApproverIdsResult.errorMessage && financeApproverIdsResult.data.length > 0;
+  const isAssignedL1Approver = currentUserId === claim.assignedL1ApproverId;
+  const isAssignedL2Approver = currentUserId === claim.assignedL2ApproverId;
+  const isDepartmentViewerForClaim =
+    claim.departmentId != null && viewerDeptIds.includes(claim.departmentId);
+  const canViewAsFinance = isFinanceActor && claim.status !== DB_CLAIM_STATUSES[0];
+  const canView =
+    currentUserId === claim.submittedBy ||
+    currentUserId === claim.onBehalfOfId ||
+    isAssignedL1Approver ||
+    isAssignedL2Approver ||
+    canViewAsFinance ||
+    isDepartmentViewerForClaim;
+
+  if (!canView && !isAdminUser) {
+    return {
+      ok: false,
+      message: "You are not authorized to view this claim.",
+    };
+  }
+
+  const claimAuditLogs = claimAuditLogsResult.errorMessage
+    ? []
+    : claimAuditLogsResult.data.map((log) => ({
+        ...log,
+        formattedCreatedAt: formatDateTime(log.createdAt),
+      }));
+
+  return {
+    ok: true,
+    data: {
+      claim,
+      auditLogs: claimAuditLogs,
+    },
   };
 }
 
@@ -1208,12 +1324,14 @@ async function processL1ClaimDecisionAction(input: {
   claimId: string;
   decision: "approve" | "reject";
   redirectToApprovalsView?: boolean;
+  returnTo?: string;
   rejectionReason?: string;
   allowResubmission?: boolean;
 }): Promise<{ ok: boolean; message?: string }> {
   const parseResult = claimDecisionSchema.safeParse({
     claimId: input.claimId,
     redirectToApprovalsView: input.redirectToApprovalsView,
+    returnTo: input.returnTo,
     rejectionReason: input.rejectionReason,
     allowResubmission: input.allowResubmission,
   });
@@ -1251,8 +1369,13 @@ async function processL1ClaimDecisionAction(input: {
   revalidatePath(ROUTES.claims.myClaims);
   revalidatePath(`${ROUTES.claims.dashboardList}/${parseResult.data.claimId}`);
 
-  if (parseResult.data.redirectToApprovalsView) {
-    redirect(`${ROUTES.claims.myClaims}?view=approvals`);
+  const redirectPath = resolveClaimDecisionRedirectPath({
+    returnTo: parseResult.data.returnTo,
+    redirectToApprovalsView: parseResult.data.redirectToApprovalsView,
+  });
+
+  if (redirectPath) {
+    redirect(redirectPath);
   }
 
   return { ok: true };
@@ -1262,12 +1385,14 @@ async function processL2ClaimDecisionAction(input: {
   claimId: string;
   decision: "approve" | "reject" | "mark-paid";
   redirectToApprovalsView?: boolean;
+  returnTo?: string;
   rejectionReason?: string;
   allowResubmission?: boolean;
 }): Promise<{ ok: boolean; message?: string }> {
   const parseResult = claimDecisionSchema.safeParse({
     claimId: input.claimId,
     redirectToApprovalsView: input.redirectToApprovalsView,
+    returnTo: input.returnTo,
     rejectionReason: input.rejectionReason,
     allowResubmission: input.allowResubmission,
   });
@@ -1305,8 +1430,13 @@ async function processL2ClaimDecisionAction(input: {
   revalidatePath(ROUTES.claims.myClaims);
   revalidatePath(`${ROUTES.claims.dashboardList}/${parseResult.data.claimId}`);
 
-  if (parseResult.data.redirectToApprovalsView) {
-    redirect(`${ROUTES.claims.myClaims}?view=approvals`);
+  const redirectPath = resolveClaimDecisionRedirectPath({
+    returnTo: parseResult.data.returnTo,
+    redirectToApprovalsView: parseResult.data.redirectToApprovalsView,
+  });
+
+  if (redirectPath) {
+    redirect(redirectPath);
   }
 
   return { ok: true };
@@ -1315,17 +1445,20 @@ async function processL2ClaimDecisionAction(input: {
 export async function approveClaimAction(input: {
   claimId: string;
   redirectToApprovalsView?: boolean;
+  returnTo?: string;
 }): Promise<{ ok: boolean; message?: string }> {
   return processL1ClaimDecisionAction({
     claimId: input.claimId,
     decision: "approve",
     redirectToApprovalsView: input.redirectToApprovalsView,
+    returnTo: input.returnTo,
   });
 }
 
 export async function rejectClaimAction(input: {
   claimId: string;
   redirectToApprovalsView?: boolean;
+  returnTo?: string;
   rejectionReason: string;
   allowResubmission: boolean;
 }): Promise<{ ok: boolean; message?: string }> {
@@ -1333,6 +1466,7 @@ export async function rejectClaimAction(input: {
     claimId: input.claimId,
     decision: "reject",
     redirectToApprovalsView: input.redirectToApprovalsView,
+    returnTo: input.returnTo,
     rejectionReason: input.rejectionReason,
     allowResubmission: input.allowResubmission,
   });
@@ -1341,17 +1475,20 @@ export async function rejectClaimAction(input: {
 export async function approveFinanceAction(input: {
   claimId: string;
   redirectToApprovalsView?: boolean;
+  returnTo?: string;
 }): Promise<{ ok: boolean; message?: string }> {
   return processL2ClaimDecisionAction({
     claimId: input.claimId,
     decision: "approve",
     redirectToApprovalsView: input.redirectToApprovalsView,
+    returnTo: input.returnTo,
   });
 }
 
 export async function rejectFinanceAction(input: {
   claimId: string;
   redirectToApprovalsView?: boolean;
+  returnTo?: string;
   rejectionReason: string;
   allowResubmission: boolean;
 }): Promise<{ ok: boolean; message?: string }> {
@@ -1359,6 +1496,7 @@ export async function rejectFinanceAction(input: {
     claimId: input.claimId,
     decision: "reject",
     redirectToApprovalsView: input.redirectToApprovalsView,
+    returnTo: input.returnTo,
     rejectionReason: input.rejectionReason,
     allowResubmission: input.allowResubmission,
   });
@@ -1367,11 +1505,13 @@ export async function rejectFinanceAction(input: {
 export async function markPaymentDoneAction(input: {
   claimId: string;
   redirectToApprovalsView?: boolean;
+  returnTo?: string;
 }): Promise<{ ok: boolean; message?: string }> {
   return processL2ClaimDecisionAction({
     claimId: input.claimId,
     decision: "mark-paid",
     redirectToApprovalsView: input.redirectToApprovalsView,
+    returnTo: input.returnTo,
   });
 }
 
