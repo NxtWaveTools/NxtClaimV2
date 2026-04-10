@@ -7,6 +7,7 @@ import { createPortal } from "react-dom";
 import { RouterLink } from "@/components/ui/router-link";
 import { ROUTES } from "@/core/config/route-registry";
 import type { ClaimAuditLogRecord } from "@/core/domain/claims/contracts";
+import { ApprovalsQuickViewProvider } from "@/modules/claims/ui/approvals-quick-view-context";
 import {
   getClaimQuickViewHydrationAction,
   type ClaimQuickViewHydrationData,
@@ -633,19 +634,21 @@ export function ApprovalsAuditModeDialog({
       : null;
 
   return (
-    <>
-      <button
-        type="button"
-        aria-haspopup="dialog"
-        onClick={openPanel}
-        className="inline-flex h-9 min-w-28 items-center justify-center gap-2 rounded-xl border border-zinc-300/80 bg-white px-3.5 text-sm font-semibold text-zinc-700 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
-      >
-        <Eye className="h-4 w-4" aria-hidden="true" />
-        View Claim
-      </button>
+    <ApprovalsQuickViewProvider value={{ closePanel }}>
+      <>
+        <button
+          type="button"
+          aria-haspopup="dialog"
+          onClick={openPanel}
+          className="inline-flex h-9 min-w-28 items-center justify-center gap-2 rounded-xl border border-zinc-300/80 bg-white px-3.5 text-sm font-semibold text-zinc-700 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+        >
+          <Eye className="h-4 w-4" aria-hidden="true" />
+          View Claim
+        </button>
 
-      {panelContent}
-    </>
+        {panelContent}
+      </>
+    </ApprovalsQuickViewProvider>
   );
 }
 
