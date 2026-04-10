@@ -19,6 +19,7 @@ import {
   LOCATION_TYPE_OPTIONS,
   NIAT_OFFLINE_LEAD_GEN_DEPARTMENT,
 } from "@/core/constants/location-types";
+import { AIDisclaimer } from "@/components/ui/ai-disclaimer";
 
 type NewClaimFormClientProps = {
   currentUser: CurrentUserHydration;
@@ -1032,6 +1033,8 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
                   )}
                 </button>
               </div>
+
+              <AIDisclaimer />
 
               <input type="hidden" {...register("detailType")} value="expense" />
 
