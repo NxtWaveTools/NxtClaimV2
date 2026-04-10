@@ -29,9 +29,11 @@ import { ClaimRejectWithReasonForm } from "@/modules/claims/ui/claim-reject-with
 import { ClaimDecisionActionForm } from "@/modules/claims/ui/claim-decision-action-form";
 import { ClaimStatusBadge } from "@/modules/claims/ui/claim-status-badge";
 import { ClaimAuditTimeline } from "@/modules/claims/ui/claim-audit-timeline";
+import { ClaimFullDetailsGrid } from "@/modules/claims/ui/claim-full-details-grid";
 import { DeleteClaimButton } from "@/modules/claims/ui/delete-claim-button";
-import { formatDate, formatDateTime } from "@/lib/format";
+import { formatDateTime } from "@/lib/format";
 import { pageBodyFont, pageDisplayFont } from "@/lib/fonts";
+import { sanitizeDashboardReturnToPath } from "@/lib/pagination-helpers";
 import {
   getAvailableClaimActions,
   type ClaimActionRole,
@@ -52,7 +54,7 @@ const FinanceEditClaimForm = dynamic(
 
 type PageProps = {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ view?: string | string[] }>;
+  searchParams: Promise<{ view?: string | string[]; returnTo?: string | string[] }>;
 };
 
 type EvidenceItem = {
@@ -70,19 +72,12 @@ type ClaimDetailRecord = NonNullable<
   Awaited<ReturnType<SupabaseClaimRepository["getClaimDetailById"]>>["data"]
 >;
 
-const indiaAmountFormatter = new Intl.NumberFormat("en-IN", {
-  style: "currency",
-  currency: "INR",
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
-});
-
-function formatAmount(amount: number | null): string {
-  if (amount === null) {
-    return "N/A";
+function firstSearchParamValue(value: string | string[] | undefined): string | undefined {
+  if (Array.isArray(value)) {
+    return value[0];
   }
 
-  return indiaAmountFormatter.format(amount);
+  return value;
 }
 
 function formatOptionalText(value: string | null | undefined, fallback = "N/A"): string {
@@ -322,14 +317,17 @@ function FinanceEditClaimSkeleton() {
 async function ClaimDetailBackButton({
   searchParams,
 }: {
-  searchParams: Promise<{ view?: string | string[] }>;
+  searchParams: Promise<{ view?: string | string[]; returnTo?: string | string[] }>;
 }) {
   const resolvedSearchParams = await searchParams;
-  const viewParam = Array.isArray(resolvedSearchParams.view)
-    ? resolvedSearchParams.view[0]
-    : resolvedSearchParams.view;
+  const viewParam = firstSearchParamValue(resolvedSearchParams.view);
+  const returnToParam = firstSearchParamValue(resolvedSearchParams.returnTo);
+  const safeReturnTo = sanitizeDashboardReturnToPath(returnToParam);
   const backHref =
-    viewParam === "approvals" ? `${ROUTES.claims.myClaims}?view=approvals` : ROUTES.claims.myClaims;
+    safeReturnTo ??
+    (viewParam === "approvals"
+      ? `${ROUTES.claims.myClaims}?view=approvals`
+      : ROUTES.claims.myClaims);
 
   return <BackButton className="w-fit" fallbackHref={backHref} />;
 }
@@ -450,9 +448,18 @@ async function EvidenceGallerySection({ evidencePaths }: { evidencePaths: Eviden
   );
 }
 
-async function ClaimDetailCore({ params }: { params: Promise<{ id: string }> }) {
-  const resolvedParams = await params;
+async function ClaimDetailCore({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ view?: string | string[]; returnTo?: string | string[] }>;
+}) {
+  const [resolvedParams, resolvedSearchParams] = await Promise.all([params, searchParams]);
   const claimId = resolvedParams.id;
+  const fallbackReturnPath = `${ROUTES.claims.myClaims}?view=approvals`;
+  const returnToParam = firstSearchParamValue(resolvedSearchParams.returnTo);
+  const returnToPath = sanitizeDashboardReturnToPath(returnToParam) ?? fallbackReturnPath;
   const claimRepository = new SupabaseClaimRepository();
 
   const [currentUserResult, claimResult, isAdminUser] = await Promise.all([
@@ -487,7 +494,7 @@ async function ClaimDetailCore({ params }: { params: Promise<{ id: string }> }) 
           Unable to load claim detail. {claimResult.errorMessage}
         </p>
         <Link
-          href={`${ROUTES.claims.myClaims}?view=approvals`}
+          href={returnToPath}
           className="mt-4 inline-flex text-sm font-medium text-indigo-500 hover:text-indigo-400"
         >
           Back to approvals
@@ -565,7 +572,11 @@ async function ClaimDetailCore({ params }: { params: Promise<{ id: string }> }) 
 
   const approveFromDetail = async () => {
     "use server";
-    await approveClaimAction({ claimId: claim.id });
+    await approveClaimAction({
+      claimId: claim.id,
+      redirectToApprovalsView: true,
+      returnTo: returnToPath,
+    });
   };
 
   const rejectFromDetail = async (formData: FormData) => {
@@ -574,6 +585,8 @@ async function ClaimDetailCore({ params }: { params: Promise<{ id: string }> }) 
     const allowResubmission = formData.get("allowResubmission") === "true";
     await rejectClaimAction({
       claimId: claim.id,
+      redirectToApprovalsView: true,
+      returnTo: returnToPath,
       rejectionReason,
       allowResubmission,
     });
@@ -581,7 +594,11 @@ async function ClaimDetailCore({ params }: { params: Promise<{ id: string }> }) 
 
   const approveFinanceFromDetail = async () => {
     "use server";
-    await approveFinanceAction({ claimId: claim.id });
+    await approveFinanceAction({
+      claimId: claim.id,
+      redirectToApprovalsView: true,
+      returnTo: returnToPath,
+    });
   };
 
   const rejectFinanceFromDetail = async (formData: FormData) => {
@@ -590,6 +607,8 @@ async function ClaimDetailCore({ params }: { params: Promise<{ id: string }> }) 
     const allowResubmission = formData.get("allowResubmission") === "true";
     await rejectFinanceAction({
       claimId: claim.id,
+      redirectToApprovalsView: true,
+      returnTo: returnToPath,
       rejectionReason,
       allowResubmission,
     });
@@ -597,15 +616,13 @@ async function ClaimDetailCore({ params }: { params: Promise<{ id: string }> }) 
 
   const markPaidFromDetail = async () => {
     "use server";
-    await markPaymentDoneAction({ claimId: claim.id });
+    await markPaymentDoneAction({
+      claimId: claim.id,
+      redirectToApprovalsView: true,
+      returnTo: returnToPath,
+    });
   };
 
-  const shouldShowExpenseTaxBreakdown =
-    !!claim.expense &&
-    (claim.expense.isGstApplicable === true ||
-      (claim.expense.cgstAmount ?? 0) > 0 ||
-      (claim.expense.sgstAmount ?? 0) > 0 ||
-      (claim.expense.igstAmount ?? 0) > 0);
   const submitterDisplayName = formatOptionalText(claim.submitterName ?? claim.submitter);
   const submitterDisplayEmail = formatOptionalText(claim.submitterEmail ?? claim.submitter);
   const claimForDisplayName =
@@ -665,43 +682,11 @@ async function ClaimDetailCore({ params }: { params: Promise<{ id: string }> }) 
           </div>
         </div>
 
-        {/* ── Key Info Grid ── */}
-        <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
-          <article className="rounded-lg border border-slate-100 bg-slate-50/80 px-3 py-2.5 dark:border-slate-800 dark:bg-slate-800/40">
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">
-              Amount
-            </p>
-            <p className="mt-1 text-sm font-bold text-slate-900 dark:text-slate-100">
-              {formatAmount(claim.expense?.totalAmount ?? claim.advance?.requestedAmount ?? null)}
-            </p>
-          </article>
-          <article className="rounded-lg border border-slate-100 bg-slate-50/80 px-3 py-2.5 dark:border-slate-800 dark:bg-slate-800/40">
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">
-              Category
-            </p>
-            <p className="mt-1 text-sm font-medium text-slate-900 dark:text-slate-100">
-              {formatOptionalText(
-                claim.expense?.expenseCategoryName ?? (claim.advance ? "Advance" : null),
-              )}
-            </p>
-          </article>
-          <article className="rounded-lg border border-slate-100 bg-slate-50/80 px-3 py-2.5 dark:border-slate-800 dark:bg-slate-800/40">
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">
-              Department
-            </p>
-            <p className="mt-1 text-sm font-medium text-slate-900 dark:text-slate-100">
-              {claim.departmentName ?? "Unknown"}
-            </p>
-          </article>
-          <article className="rounded-lg border border-slate-100 bg-slate-50/80 px-3 py-2.5 dark:border-slate-800 dark:bg-slate-800/40">
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">
-              Submitted On
-            </p>
-            <p className="mt-1 text-sm font-medium text-slate-900 dark:text-slate-100">
-              {formatDate(claim.submittedAt)}
-            </p>
-          </article>
-        </div>
+        <ClaimFullDetailsGrid
+          claim={claim}
+          includeExpenseDetail={false}
+          includeAdvanceDetail={false}
+        />
 
         {/* ── Supplementary Info ── */}
         <div className="mt-3 grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -767,205 +752,7 @@ async function ClaimDetailCore({ params }: { params: Promise<{ id: string }> }) 
         </section>
       ) : null}
 
-      {claim.expense ? (
-        <section className="mt-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <h2 className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-600 dark:text-slate-400">
-            Expense Detail
-          </h2>
-          <div className="mt-3 grid grid-cols-2 gap-x-6 gap-y-2.5 md:grid-cols-3">
-            <div>
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                Bill No
-              </p>
-              <p className="mt-0.5 text-sm font-medium text-slate-900 dark:text-slate-100">
-                {formatOptionalText(claim.expense.billNo, "-")}
-              </p>
-            </div>
-            <div>
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                Vendor
-              </p>
-              <p className="mt-0.5 text-sm font-medium text-slate-900 dark:text-slate-100">
-                {formatOptionalText(claim.expense.vendorName)}
-              </p>
-            </div>
-            <div>
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                Expense Category
-              </p>
-              <p className="mt-0.5 text-sm font-medium text-slate-900 dark:text-slate-100">
-                {formatOptionalText(claim.expense.expenseCategoryName)}
-              </p>
-            </div>
-            <div>
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                Product
-              </p>
-              <p className="mt-0.5 text-sm font-medium text-slate-900 dark:text-slate-100">
-                {formatOptionalText(claim.expense.productName)}
-              </p>
-            </div>
-            <div>
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                Location
-              </p>
-              <p className="mt-0.5 text-sm font-medium text-slate-900 dark:text-slate-100">
-                {formatOptionalText(claim.expense.locationName)}
-              </p>
-            </div>
-            {claim.expense.locationType ? (
-              <div>
-                <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                  Location Type
-                </p>
-                <p className="mt-0.5 text-sm font-medium text-slate-900 dark:text-slate-100">
-                  {claim.expense.locationType}
-                </p>
-              </div>
-            ) : null}
-            {claim.expense.locationDetails ? (
-              <div>
-                <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                  Location Details
-                </p>
-                <p className="mt-0.5 text-sm font-medium text-slate-900 dark:text-slate-100">
-                  {claim.expense.locationDetails}
-                </p>
-              </div>
-            ) : null}
-            <div>
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                Transaction Date
-              </p>
-              <p className="mt-0.5 text-sm font-medium text-slate-900 dark:text-slate-100">
-                {formatDate(claim.expense.transactionDate)}
-              </p>
-            </div>
-            <div>
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                GST Applicable
-              </p>
-              <p className="mt-0.5 text-sm font-medium text-slate-900 dark:text-slate-100">
-                {claim.expense.isGstApplicable === null
-                  ? "N/A"
-                  : claim.expense.isGstApplicable
-                    ? "Yes"
-                    : "No"}
-              </p>
-            </div>
-            <div>
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                GST Number
-              </p>
-              <p className="mt-0.5 text-sm font-medium text-slate-900 dark:text-slate-100">
-                {formatOptionalText(claim.expense.gstNumber)}
-              </p>
-            </div>
-            <div>
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                Basic Amount
-              </p>
-              <p className="mt-0.5 text-sm font-medium text-slate-900 dark:text-slate-100">
-                {formatAmount(claim.expense.basicAmount)}
-              </p>
-            </div>
-            {shouldShowExpenseTaxBreakdown ? (
-              <>
-                <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                    CGST
-                  </p>
-                  <p className="mt-0.5 text-sm font-medium text-slate-900 dark:text-slate-100">
-                    {formatAmount(claim.expense.cgstAmount)}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                    SGST
-                  </p>
-                  <p className="mt-0.5 text-sm font-medium text-slate-900 dark:text-slate-100">
-                    {formatAmount(claim.expense.sgstAmount)}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                    IGST
-                  </p>
-                  <p className="mt-0.5 text-sm font-medium text-slate-900 dark:text-slate-100">
-                    {formatAmount(claim.expense.igstAmount)}
-                  </p>
-                </div>
-              </>
-            ) : null}
-            <div>
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-indigo-500 dark:text-indigo-400">
-                Total Amount
-              </p>
-              <p className="mt-0.5 text-sm font-bold text-slate-900 dark:text-slate-100">
-                {formatAmount(claim.expense.totalAmount)}
-              </p>
-            </div>
-            <div>
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                Purpose
-              </p>
-              <p className="mt-0.5 text-sm font-medium text-slate-900 dark:text-slate-100">
-                {formatOptionalText(claim.expense.purpose)}
-              </p>
-            </div>
-            <div>
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                Remarks
-              </p>
-              <p className="mt-0.5 text-sm font-medium text-slate-900 dark:text-slate-100">
-                {formatOptionalText(claim.expense.remarks)}
-              </p>
-            </div>
-            <div className="col-span-2 md:col-span-1">
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                People Involved
-              </p>
-              <p className="mt-0.5 text-sm font-medium text-slate-900 dark:text-slate-100">
-                {formatOptionalText(claim.expense.peopleInvolved)}
-              </p>
-            </div>
-          </div>
-        </section>
-      ) : null}
-
-      {claim.advance ? (
-        <section className="mt-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <h2 className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-600 dark:text-slate-400">
-            Advance Detail
-          </h2>
-          <div className="mt-3 grid grid-cols-2 gap-x-6 gap-y-2.5 md:grid-cols-3">
-            <div>
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                Purpose
-              </p>
-              <p className="mt-0.5 text-sm font-medium text-slate-900 dark:text-slate-100">
-                {claim.advance.purpose}
-              </p>
-            </div>
-            <div>
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-indigo-500 dark:text-indigo-400">
-                Requested Amount
-              </p>
-              <p className="mt-0.5 text-sm font-bold text-slate-900 dark:text-slate-100">
-                {formatAmount(claim.advance.requestedAmount)}
-              </p>
-            </div>
-            <div>
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                Expected Usage Date
-              </p>
-              <p className="mt-0.5 text-sm font-medium text-slate-900 dark:text-slate-100">
-                {formatDate(claim.advance.expectedUsageDate)}
-              </p>
-            </div>
-          </div>
-        </section>
-      ) : null}
+      <ClaimFullDetailsGrid claim={claim} includeSummary={false} />
 
       {canTakeDecision ? (
         <section className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4 dark:border-amber-700/50 dark:bg-amber-900/10">
@@ -987,7 +774,7 @@ async function ClaimDetailCore({ params }: { params: Promise<{ id: string }> }) 
                 loadingMessage="Marking payment as done..."
                 successMessage="Claim marked as paid."
                 errorMessage="Unable to mark payment as done."
-                redirectToHref={`${ROUTES.claims.myClaims}?view=approvals`}
+                redirectToHref={returnToPath}
               />
             ) : canTakeFinanceAuthorizationDecision ? (
               <>
@@ -997,11 +784,11 @@ async function ClaimDetailCore({ params }: { params: Promise<{ id: string }> }) 
                   loadingMessage="Approving finance step..."
                   successMessage="Finance decision approved."
                   errorMessage="Unable to approve finance step."
-                  redirectToHref={`${ROUTES.claims.myClaims}?view=approvals`}
+                  redirectToHref={returnToPath}
                 />
                 <ClaimRejectWithReasonForm
                   action={rejectFinanceFromDetail}
-                  redirectToHref={`${ROUTES.claims.myClaims}?view=approvals`}
+                  redirectToHref={returnToPath}
                 />
               </>
             ) : (
@@ -1012,11 +799,11 @@ async function ClaimDetailCore({ params }: { params: Promise<{ id: string }> }) 
                   loadingMessage="Approving claim..."
                   successMessage="Claim approved."
                   errorMessage="Unable to approve claim."
-                  redirectToHref={`${ROUTES.claims.myClaims}?view=approvals`}
+                  redirectToHref={returnToPath}
                 />
                 <ClaimRejectWithReasonForm
                   action={rejectFromDetail}
-                  redirectToHref={`${ROUTES.claims.myClaims}?view=approvals`}
+                  redirectToHref={returnToPath}
                 />
               </>
             )}
@@ -1076,7 +863,7 @@ export default async function ClaimDetailPage({ params, searchParams }: PageProp
 
           {/* Claim detail content */}
           <Suspense fallback={<ClaimDetailContentSkeleton />}>
-            <ClaimDetailCore params={params} />
+            <ClaimDetailCore params={params} searchParams={searchParams} />
           </Suspense>
         </main>
       </div>

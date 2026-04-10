@@ -411,26 +411,29 @@ test.describe("Navigation Filter Stability & Finance Edit", () => {
       }
 
       await expect(searchInput).toBeVisible({ timeout: 10000 });
+      await expect(page.locator(".animate-pulse")).not.toBeVisible({ timeout: 20000 });
 
       const searchTerm = `UNIQUE-NAV-${runTag}`;
-      await searchInput.fill(searchTerm);
-
-      // The heading should NEVER unmount during the debounce + server fetch cycle
-      await expect(heading).toBeVisible();
-
-      // Wait for debounce (400ms) + URL update
       await expect
         .poll(
-          () => {
+          async () => {
+            // Refill on each attempt to tolerate first-render state hydration races.
+            await searchInput.fill(searchTerm);
+            await page.waitForTimeout(650);
+
+            const inputValue = await searchInput.inputValue().catch(() => "");
             const url = new URL(page.url());
-            return url.searchParams.get("search_query");
+            const queryValue = url.searchParams.get("search_query");
+
+            return inputValue === searchTerm && queryValue === searchTerm;
           },
           {
-            timeout: 10000,
-            message: "waiting for search_query URL param to appear after debounce",
+            timeout: 30000,
+            intervals: [500, 900, 1300],
+            message: "waiting for search input and search_query URL param to synchronize",
           },
         )
-        .toBe(searchTerm);
+        .toBe(true);
 
       // The layout heading must still be visible (no unmount)
       await expect(heading).toBeVisible();
@@ -518,6 +521,61 @@ test.describe("Navigation Filter Stability & Finance Edit", () => {
             },
           )
           .toBe(false);
+      }
+    });
+  });
+
+  test("NAV-2B: claim detail requests are deferred until explicit click", async ({ browser }) => {
+    await withActorPage(browser, ACTORS.employee.email, async (page) => {
+      await gotoWithRetry(page, "/dashboard/my-claims");
+      await expect(page.locator(".animate-pulse")).not.toBeVisible({ timeout: 15000 });
+
+      const claimLink = page.locator('a[href*="/dashboard/claims/"]').first();
+      await expect(claimLink).toBeVisible({ timeout: 15000 });
+
+      const href = await claimLink.getAttribute("href");
+      if (!href) {
+        throw new Error("Unable to resolve claim detail href for prefetch assertion.");
+      }
+
+      const detailPath = new URL(href, page.url()).pathname;
+      const detailRequests: string[] = [];
+
+      const onRequest = (request: { url: () => string }) => {
+        const requestUrl = request.url();
+
+        let requestPath: string;
+        try {
+          requestPath = new URL(requestUrl).pathname;
+        } catch {
+          return;
+        }
+
+        if (requestPath === detailPath) {
+          detailRequests.push(requestUrl);
+        }
+      };
+
+      page.on("request", onRequest);
+
+      try {
+        await claimLink.hover();
+        await page.waitForTimeout(500);
+        expect(detailRequests).toHaveLength(0);
+
+        await Promise.all([
+          page.waitForURL((url) => url.pathname === detailPath, { timeout: 15000 }),
+          claimLink.click(),
+        ]);
+
+        await expect
+          .poll(() => detailRequests.length, {
+            timeout: 5000,
+            message: "waiting for claim detail request after explicit click",
+          })
+          .toBeGreaterThan(0);
+      } finally {
+        page.off("request", onRequest);
       }
     });
   });

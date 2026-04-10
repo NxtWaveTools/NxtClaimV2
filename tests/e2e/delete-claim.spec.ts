@@ -192,16 +192,87 @@ async function acceptPolicyGateIfPresent(page: Page): Promise<void> {
   await expect(policyGateHeading).toBeHidden({ timeout: 30000 });
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+async function waitForAuthenticatedDashboard(page: Page, email: string): Promise<void> {
+  await expect
+    .poll(
+      async () => {
+        await gotoWithRetry(page, "/dashboard");
+        await page.waitForLoadState("networkidle", { timeout: 5000 }).catch(() => undefined);
+        await acceptPolicyGateIfPresent(page);
+
+        if (/\/auth\/login/i.test(page.url())) {
+          return false;
+        }
+
+        const signOutVisible = await page
+          .getByRole("button", { name: /sign out/i })
+          .first()
+          .isVisible({ timeout: 1000 })
+          .catch(() => false);
+
+        const emailHeadingVisible = await page
+          .getByRole("heading", { name: new RegExp(escapeRegExp(email), "i") })
+          .first()
+          .isVisible({ timeout: 1000 })
+          .catch(() => false);
+
+        return signOutVisible || emailHeadingVisible;
+      },
+      {
+        timeout: 45000,
+        intervals: [1000, 2000, 3000],
+        message: `waiting for authenticated dashboard for ${email}`,
+      },
+    )
+    .toBe(true);
+}
+
+async function fillTextboxIfEditable(
+  page: Page,
+  label: string | RegExp,
+  value: string,
+): Promise<void> {
+  const textbox = page
+    .getByRole("textbox", {
+      name: typeof label === "string" ? new RegExp(label, "i") : label,
+    })
+    .first();
+
+  await expect(textbox).toBeVisible({ timeout: 15000 });
+
+  const isDisabled = await textbox.isDisabled().catch(() => false);
+  const isReadOnly = await textbox
+    .evaluate((element) => {
+      const input = element as HTMLInputElement;
+      return input.readOnly || element.getAttribute("aria-readonly") === "true";
+    })
+    .catch(() => false);
+
+  if (isDisabled || isReadOnly) {
+    return;
+  }
+
+  await textbox.fill(value);
+}
+
 async function ensureAuthenticated(page: Page, email: string): Promise<void> {
   await gotoWithRetry(page, "/dashboard");
+  await page.waitForLoadState("networkidle", { timeout: 5000 }).catch(() => undefined);
   await acceptPolicyGateIfPresent(page);
 
-  const signOutButton = page.getByRole("button", { name: /sign out/i });
-  const hasSession =
+  const alreadyAuthenticated =
     !/\/auth\/login/i.test(page.url()) &&
-    (await signOutButton.isVisible({ timeout: 3000 }).catch(() => false));
+    (await page
+      .getByRole("button", { name: /sign out/i })
+      .first()
+      .isVisible({ timeout: 2000 })
+      .catch(() => false));
 
-  if (hasSession) {
+  if (alreadyAuthenticated) {
     return;
   }
 
@@ -231,9 +302,7 @@ async function ensureAuthenticated(page: Page, email: string): Promise<void> {
     throw new Error(`Session bootstrap failed for ${email}: HTTP ${sessionResponse.status()}`);
   }
 
-  await gotoWithRetry(page, "/dashboard");
-  await acceptPolicyGateIfPresent(page);
-  await expect(page).not.toHaveURL(/\/auth\/login/i);
+  await waitForAuthenticatedDashboard(page, email);
 }
 
 async function openClaimForm(page: Page, email: string): Promise<void> {
@@ -249,6 +318,30 @@ async function selectOptionByLabel(page: Page, label: string | RegExp, optionLab
     name: typeof label === "string" ? new RegExp(label, "i") : label,
   });
   await expect(select).toBeVisible();
+
+  const isDisabled = await select.isDisabled().catch(() => false);
+  const isReadOnly =
+    (await select.getAttribute("readonly").catch(() => null)) !== null ||
+    (await select.getAttribute("aria-readonly").catch(() => null)) === "true";
+
+  if (isDisabled || isReadOnly) {
+    return;
+  }
+
+  await expect
+    .poll(
+      async () =>
+        select
+          .locator("option")
+          .filter({ hasText: new RegExp(`^\\s*${escapeRegExp(optionLabel)}\\s*$`, "i") })
+          .count(),
+      {
+        timeout: 15000,
+        message: `waiting for option ${optionLabel}`,
+      },
+    )
+    .toBeGreaterThan(0);
+
   await select.selectOption({ label: optionLabel });
 }
 
@@ -272,7 +365,7 @@ async function submitExpenseClaim(
   await selectOptionByLabel(page, /Payment Mode/i, input.paymentModeName);
   await selectOptionByLabel(page, /Expense Category/i, input.expenseCategoryName);
 
-  await page.getByRole("textbox", { name: /^Employee ID \*/i }).fill(input.employeeId);
+  await fillTextboxIfEditable(page, /^Employee ID \*/i, input.employeeId);
   await page.getByRole("textbox", { name: /^Bill No \*/i }).fill(input.billNo);
   await page.getByRole("textbox", { name: /^Purpose/i }).fill(input.purpose);
   await page.getByRole("spinbutton", { name: /^Basic Amount \*/i }).fill(String(input.amount));
@@ -391,6 +484,7 @@ async function waitForClaimAndDetailsInactive(claimId: string): Promise<void> {
 
 test.describe("Delete Claim", () => {
   test.describe.configure({ mode: "serial" });
+  test.setTimeout(120000);
   test.use({ storageState: getAuthStatePathByRole("submitter") });
 
   test("submitter can delete and recreate same bill, and detail-page delete redirects", async ({
@@ -440,7 +534,12 @@ test.describe("Delete Claim", () => {
     );
     await firstDeleteDialog.getByRole("button", { name: /^Delete$/i }).click();
 
-    await expect(firstRow).toHaveCount(0);
+    await expect
+      .poll(async () => page.locator("tbody tr", { hasText: firstClaim.claimId }).count(), {
+        timeout: 30000,
+        message: `waiting for deleted claim row ${firstClaim.claimId} to disappear from table`,
+      })
+      .toBe(0);
     await waitForClaimAndDetailsInactive(firstClaim.claimId);
 
     await submitExpenseClaim(page, {

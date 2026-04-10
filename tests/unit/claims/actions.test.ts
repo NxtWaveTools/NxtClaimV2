@@ -513,6 +513,33 @@ describe("claims actions", () => {
     expect(mockRedirect).toHaveBeenCalledWith("/dashboard/my-claims?view=approvals");
   });
 
+  test("approveClaimAction redirects to sanitized returnTo path when provided", async () => {
+    const { approveClaimAction } = await import("@/modules/claims/actions");
+
+    await approveClaimAction({
+      claimId: "11111111-1111-4111-8111-111111111111",
+      returnTo: "/dashboard/my-claims?status=Submitted+-+Awaiting+HOD+approval",
+    });
+
+    expect(mockRedirect).toHaveBeenCalledWith(
+      "/dashboard/my-claims?status=Submitted+-+Awaiting+HOD+approval",
+    );
+  });
+
+  test("rejectClaimAction ignores unsafe returnTo and falls back to approvals view", async () => {
+    const { rejectClaimAction } = await import("@/modules/claims/actions");
+
+    await rejectClaimAction({
+      claimId: "11111111-1111-4111-8111-111111111111",
+      returnTo: "https://example.com/steal",
+      redirectToApprovalsView: true,
+      rejectionReason: "Invalid bill metadata",
+      allowResubmission: true,
+    });
+
+    expect(mockRedirect).toHaveBeenCalledWith("/dashboard/my-claims?view=approvals");
+  });
+
   test("approveFinanceAction transitions finance authorization stage", async () => {
     const { approveFinanceAction } = await import("@/modules/claims/actions");
 

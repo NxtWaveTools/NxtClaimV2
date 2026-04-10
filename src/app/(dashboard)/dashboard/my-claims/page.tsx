@@ -5,12 +5,16 @@ import { Suspense, cache } from "react";
 import { CirclePlus } from "lucide-react";
 import { AppShellHeader } from "@/components/app-shell-header";
 import { BackButton } from "@/components/ui/back-button";
+import { RouterLink } from "@/components/ui/router-link";
 import { TableSkeleton } from "@/components/ui/table-skeleton";
 import { ROUTES } from "@/core/config/route-registry";
 import {
+  CLAIM_STATUSES,
   DB_CLAIM_STATUSES,
   isPendingFinanceApprovalStatus,
   isSubmitterDeletableClaimStatus,
+  mapCanonicalStatusToDbStatuses,
+  type ClaimStatus,
   type DbClaimStatus,
 } from "@/core/constants/statuses";
 import type {
@@ -28,6 +32,7 @@ import {
 import { logger } from "@/core/infra/logging/logger";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { pageBodyFont, pageDisplayFont } from "@/lib/fonts";
+import { appendReturnToParam, buildPathWithSearchParams } from "@/lib/pagination-helpers";
 import { getCachedCurrentUser } from "@/modules/auth/server/get-current-user";
 import {
   approveClaimAction,
@@ -212,13 +217,26 @@ function normalizeStatusFilter(value: string | undefined): DbClaimStatus[] | und
   const parsed = value
     .split(",")
     .map((entry) => entry.trim())
-    .filter((entry): entry is DbClaimStatus => DB_CLAIM_STATUSES.includes(entry as DbClaimStatus));
+    .filter((entry) => entry.length > 0)
+    .flatMap((entry) => {
+      if (DB_CLAIM_STATUSES.includes(entry as DbClaimStatus)) {
+        return [entry as DbClaimStatus];
+      }
 
-  if (parsed.length === 0) {
+      if (CLAIM_STATUSES.includes(entry as ClaimStatus)) {
+        return mapCanonicalStatusToDbStatuses(entry as ClaimStatus);
+      }
+
+      return [];
+    });
+
+  const deduplicated = [...new Set(parsed)];
+
+  if (deduplicated.length === 0) {
     return undefined;
   }
 
-  return parsed;
+  return deduplicated;
 }
 
 function buildClaimFilters(searchParams?: Record<string, SearchParamsValue>): GetMyClaimsFilters {
@@ -507,6 +525,10 @@ async function ClaimsCommandCenterTable({
   const cursor = firstParamValue(searchParams?.cursor) ?? null;
   const previousCursor = firstParamValue(searchParams?.prevCursor) ?? null;
   const previousCursorToken = previousCursor ?? (cursor ? "__first__" : null);
+  const listReturnToPath = buildPathWithSearchParams(
+    ROUTES.claims.myClaims,
+    toSearchParams(searchParams).toString(),
+  );
 
   if (view === "approvals") {
     const approvalsResult = await pendingApprovalsService.execute({
@@ -781,12 +803,15 @@ async function ClaimsCommandCenterTable({
                         className="group transition-colors hover:bg-zinc-50/70 dark:hover:bg-zinc-900/40"
                       >
                         <td className="whitespace-nowrap px-3 py-2 font-medium text-zinc-900 dark:text-zinc-100">
-                          <Link
-                            href={ROUTES.claims.detail(claim.id)}
+                          <RouterLink
+                            href={appendReturnToParam(
+                              ROUTES.claims.detail(claim.id),
+                              listReturnToPath,
+                            )}
                             className="text-indigo-500 hover:text-indigo-400 hover:underline"
                           >
                             {claim.id}
-                          </Link>
+                          </RouterLink>
                         </td>
                         <td className="whitespace-nowrap px-3 py-2">
                           <span>{claim.employeeId}</span>
@@ -824,8 +849,6 @@ async function ClaimsCommandCenterTable({
                               detailType={claim.detailType}
                               submitter={claim.submitter}
                               amountLabel={claim.formattedTotalAmount}
-                              categoryName={claim.categoryName}
-                              purpose={claim.purpose}
                               submissionType={claim.submissionType}
                               onBehalfEmail={claim.onBehalfEmail}
                               expenseReceiptFilePath={claim.expenseReceiptFilePath}
@@ -932,12 +955,15 @@ async function ClaimsCommandCenterTable({
                       className="transition-colors hover:bg-zinc-50/70 dark:hover:bg-zinc-900/40"
                     >
                       <td className="px-3 py-2 font-medium text-zinc-900 dark:text-zinc-100">
-                        <Link
-                          href={ROUTES.claims.detail(claim.id)}
+                        <RouterLink
+                          href={appendReturnToParam(
+                            ROUTES.claims.detail(claim.id),
+                            listReturnToPath,
+                          )}
                           className="whitespace-nowrap text-indigo-500 hover:text-indigo-400 hover:underline"
                         >
                           {claim.id}
-                        </Link>
+                        </RouterLink>
                       </td>
                       <td className="whitespace-nowrap px-3 py-2">
                         <span>{claim.employeeId}</span>
@@ -996,8 +1022,6 @@ async function ClaimsCommandCenterTable({
                             detailType={claim.detailType}
                             submitter={claim.submitterLabel ?? claim.employeeName}
                             amountLabel={claim.formattedTotalAmount}
-                            categoryName={claim.categoryName ?? "Uncategorized"}
-                            purpose={claim.purpose}
                             submissionType={claim.submissionType}
                             onBehalfEmail={claim.onBehalfEmail}
                             expenseReceiptFilePath={claim.expenseReceiptFilePath}

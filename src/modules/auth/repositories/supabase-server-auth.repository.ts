@@ -6,6 +6,7 @@ import type {
   OAuthProvider,
 } from "@/core/domain/auth/contracts";
 import { serverEnv } from "@/core/config/server-env";
+import { applySupabaseAuthCookies } from "@/core/infra/supabase/supabase-auth-cookie-utils";
 
 export class SupabaseServerAuthRepository implements AuthRepository {
   async signInWithEmail(
@@ -94,13 +95,23 @@ export class SupabaseServerAuthRepository implements AuthRepository {
             return cookieStore.getAll();
           },
           setAll(cookiesToSet) {
-            cookiesToSet.forEach(({ name, value, options }) => {
-              try {
-                cookieStore.set(name, value, options);
-              } catch {
-                // Server components may disallow setting cookies; route handlers/actions should handle writes.
-              }
-            });
+            try {
+              applySupabaseAuthCookies({
+                existingCookies: cookieStore.getAll(),
+                cookiesToSet,
+                setCookie: (name, value, options) => {
+                  cookieStore.set(name, value, options);
+                },
+              });
+            } catch {
+              cookiesToSet.forEach(({ name, value, options }) => {
+                try {
+                  cookieStore.set(name, value, options);
+                } catch {
+                  // Server components may disallow setting cookies; route handlers/actions should handle writes.
+                }
+              });
+            }
           },
         },
       },
