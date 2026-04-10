@@ -5,6 +5,7 @@ import { serverEnv } from "@/core/config/server-env";
 import { isAllowedEmailDomain } from "@/core/config/allowed-domains";
 import { ROUTES } from "@/core/config/route-registry";
 import { logger } from "@/core/infra/logging/logger";
+import { applySupabaseAuthCookies } from "@/core/infra/supabase/supabase-auth-cookie-utils";
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const requestUrl = new URL(request.url);
@@ -28,8 +29,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
           return cookieStore.getAll();
         },
         setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value, options }) => {
-            response.cookies.set(name, value, options);
+          applySupabaseAuthCookies({
+            existingCookies: cookieStore.getAll(),
+            cookiesToSet,
+            setCookie: (name, value, options) => {
+              response.cookies.set(name, value, options);
+            },
           });
         },
       },

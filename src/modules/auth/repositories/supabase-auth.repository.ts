@@ -91,6 +91,10 @@ export class SupabaseAuthRepository implements AuthRepository {
   }
 
   async signOut(): Promise<{ errorMessage: string | null }> {
+    await fetch("/api/auth/logout", {
+      method: "POST",
+    }).catch(() => null);
+
     const supabase = getBrowserSupabaseClient();
     const { error } = await supabase.auth.signOut();
     return { errorMessage: error?.message ?? null };

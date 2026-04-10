@@ -565,6 +565,20 @@ export function NewClaimFormClient({ currentUser, options }: NewClaimFormClientP
       startNavTransition(() => {
         router.push("/dashboard/my-claims", { scroll: false });
       });
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "Failed to submit claim.";
+      const isHeaderSizeFailure =
+        /Request Header Fields Too Large/i.test(errorMessage) ||
+        /unexpected response was received from the server/i.test(errorMessage) ||
+        /Failed to fetch/i.test(errorMessage);
+
+      if (isHeaderSizeFailure) {
+        toast.error(
+          "Session cookies may be too large. Please sign out, sign in again, refresh the page, and retry submission.",
+        );
+      } else {
+        toast.error(errorMessage);
+      }
     } finally {
       setIsSubmitting(false);
     }
